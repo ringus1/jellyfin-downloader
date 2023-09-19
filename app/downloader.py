@@ -10,6 +10,7 @@ import backoff
 import socket
 import uuid
 import hashlib
+import os
 
 from .settings import config
 
@@ -19,10 +20,12 @@ USER = config["authentication"]["username"]
 PASS = config["authentication"]["pass"]
 SERVER_HOST = config["server"]["url"]
 CONNECTIONS = config["client"]["connections"]
-DUMP_EVERY = 20000000
+DUMP_EVERY = config["client"]["buffersize"]
+TIMEOUT_CONFIG = aiohttp.client.ClientTimeout(total=60, connect=20, sock_connect=20, sock_read=60)
+KEEP_PARTIALS = config["client"]["keep_partials"]
 
 
-def backoff_hdlr(details):
+def backoff_msg(details):
     args = details["args"]
     filename = args[2].split("/")[-1].split("?")[0]
     print("Backing off {wait:0.1f} seconds after {tries} tries for file {filename}".format(
@@ -46,13 +49,16 @@ class Downloader:
         is_remote: bool = False,
         video_bitrate: Optional[int] = 4000,
         force_transcode: bool = True,
+        h265: bool = False
     ):
         # if video_bitrate is None:
         #     if is_remote:
         #         video_bitrate = settings.remote_kbps
         #     else:
         #         video_bitrate = settings.local_kbps
-        transcode_codecs = "h265,hevc,h264,mpeg4,mpeg2video"
+        transcode_codecs = "h264,mpeg4,mpeg2video"
+        if h265:
+            transcode_codecs = "h265,hevc," + transcode_codecs
         audio_transcode_codecs = "aac,mp3,ac3,opus,flac,vorbis"
         profile = {
             "Name": "jellyfin-downloader",
@@ -161,9 +167,12 @@ class Downloader:
             term=name, media=category)["Items"]
 
         self.item = items[0]
+        iteminfo = self.client.jellyfin.get_item(self.item["Id"])
 
-        self.profile = self.get_profile()
-        self.info = self.client.jellyfin.get_play_info(self.item["Id"], self.profile)
+        self.profile = self.get_profile(h265=config["client"]["prefer_h265"])
+        self.info = self.client.jellyfin.get_play_info(self.item["Id"], self.profile, sid=0)
+
+        self.subtitle_url = SERVER_HOST + self.info['MediaSources'][0]['MediaStreams'][0]['DeliveryUrl']
         m3u8_url = SERVER_HOST + self.info["MediaSources"][0]["TranscodingUrl"]
 
         print(m3u8_url)
@@ -178,6 +187,15 @@ class Downloader:
         r.raise_for_status()
         self.m3u8_obj = m3u8.loads(r.content.decode("utf-8"))
 
+    async def download_subtitles(self):
+        async with aiohttp.ClientSession(
+            raise_for_status=True,
+            timeout=TIMEOUT_CONFIG
+        ) as session:
+            _, data = await self.download_async(session, self.subtitle_url)
+        with open("final.PL.srt", "wb") as f:
+            f.write(data)
+
     async def download_files(self, *, limit=None):
         try:
             await self._download_files(limit=limit)
@@ -190,19 +208,15 @@ class Downloader:
     async def _download_files(self, *, limit=None):
         self.started_at = datetime.utcnow()
         files = [self.base_url + "/" + uri for uri in self.m3u8_obj.files]
-        bigbuffer = b''
 
         print("Starting session")
         self.client.jellyfin.session_playing(data=self.get_playdata(nowplaying=True))
 
-        timeout=aiohttp.client.ClientTimeout(total=60, connect=20, sock_connect=20, sock_read=60)
-        headers=None
         async with aiohttp.ClientSession(
-            headers=headers,
             raise_for_status=True,
-            timeout=timeout
+            timeout=TIMEOUT_CONFIG
         ) as session:
-            await self.download_async(session, files[0])
+            _, bigbuffer = await self.download_async(session, files[0])
 
         start_idx = 1
         all_files = len(files)
@@ -212,7 +226,7 @@ class Downloader:
         headers = {"X-Buffer-Only": "true"}
         async with aiohttp.ClientSession(
             headers=headers,
-            timeout=timeout,
+            timeout=TIMEOUT_CONFIG,
             raise_for_status=True
         ) as session:
             while start_idx < all_files:
@@ -243,11 +257,14 @@ class Downloader:
 
     @backoff.on_exception(
         backoff.expo,
-        (aiohttp.ClientError,),
-        on_backoff=backoff_hdlr,
+        (aiohttp.ClientError, aiohttp.client.ClientConnectionError),
+        on_backoff=backoff_msg,
         max_time=60,
         max_tries=7)
     async def download_async(self, session: "aiohttp.ClientSession", url: str, *, idx=None):
         async with session.get(url) as response:
             data = await response.read()
+            if KEEP_PARTIALS:
+                with open(os.path.join("downloads", url.split("/")[-1].split("?")[0]), "wb") as f:
+                    f.write(data)
             return idx, data

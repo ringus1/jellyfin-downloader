@@ -1,5 +1,8 @@
 config.yml
 *.mp4
 *.ts
+*.srt
+*.vtt
+*.txt
 .vscode/
 __pycache__
