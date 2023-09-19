@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "jellyfin-downloader"
+version = "0.1.0"
+description = ""
+authors = ["ringus1 <ringus1@dm.me>"]
+readme = "README.md"
+packages = [{include = "jellyfin_downloader"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+jellyfin-apiclient-python = "^1.9.2"
+m3u8 = "^3.6.0"
+aiohttp = "^3.8.5"
+backoff = "^2.2.1"
+pyyaml = "^6.0.1"
+humanize = "^4.8.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

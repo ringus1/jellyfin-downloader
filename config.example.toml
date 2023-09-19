@@ -1,0 +1,10 @@
+server:
+ url: http://localhost:8096
+
+authentication:
+  username: aaa
+  pass: bbb
+
+client:
+  connections: 10
+  buffersize: 10M

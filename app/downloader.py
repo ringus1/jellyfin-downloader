@@ -1,0 +1,253 @@
+from jellyfin_apiclient_python import JellyfinClient
+from typing import Optional
+from datetime import datetime
+
+import requests
+import m3u8
+import asyncio
+import aiohttp
+import backoff
+import socket
+import uuid
+import hashlib
+
+from .settings import config
+
+
+APP_NAME = "JellyfinDownloader"
+USER = config["authentication"]["username"]
+PASS = config["authentication"]["pass"]
+SERVER_HOST = config["server"]["url"]
+CONNECTIONS = config["client"]["connections"]
+DUMP_EVERY = 20000000
+
+
+def backoff_hdlr(details):
+    args = details["args"]
+    filename = args[2].split("/")[-1].split("?")[0]
+    print("Backing off {wait:0.1f} seconds after {tries} tries for file {filename}".format(
+        wait=details["wait"], filename=filename, tries=details["tries"]))
+
+
+class Downloader:
+    def __init__(self) -> None:
+        self.client = None
+        self.item = None
+        self.profile = None
+        self.info = None
+        self.base_url = None
+        self.m3u8_obj = None
+        self.started_at = None
+        self.parallel = CONNECTIONS
+
+    @classmethod
+    def get_profile(
+        cls,
+        is_remote: bool = False,
+        video_bitrate: Optional[int] = 4000,
+        force_transcode: bool = True,
+    ):
+        # if video_bitrate is None:
+        #     if is_remote:
+        #         video_bitrate = settings.remote_kbps
+        #     else:
+        #         video_bitrate = settings.local_kbps
+        transcode_codecs = "h265,hevc,h264,mpeg4,mpeg2video"
+        audio_transcode_codecs = "aac,mp3,ac3,opus,flac,vorbis"
+        profile = {
+            "Name": "jellyfin-downloader",
+            "MaxStreamingBitrate": video_bitrate * 1000,
+            "MaxStaticBitrate": video_bitrate * 1000,
+            "MusicStreamingTranscodingBitrate": 1920000,
+            "TimelineOffsetSeconds": 5,
+            "TranscodingProfiles": [
+                {"Type": "Audio"},
+                {
+                    "Container": "ts",
+                    "Type": "Video",
+                    "Protocol": "hls",
+                    "AudioCodec": audio_transcode_codecs,
+                    "VideoCodec": transcode_codecs,
+                    "MaxAudioChannels": "6",
+                },
+                {"Container": "jpeg", "Type": "Photo"},
+            ],
+            "DirectPlayProfiles": [{"Type": "Video"}, {"Type": "Audio"}, {"Type": "Photo"}],
+            "ResponseProfiles": [],
+            "ContainerProfiles": [],
+            "CodecProfiles": [],
+            "SubtitleProfiles": [
+                {"Format": "srt", "Method": "External"},
+                {"Format": "srt", "Method": "Embed"},
+                {"Format": "ass", "Method": "External"},
+                {"Format": "ass", "Method": "Embed"},
+                {"Format": "sub", "Method": "Embed"},
+                {"Format": "sub", "Method": "External"},
+                {"Format": "ssa", "Method": "Embed"},
+                {"Format": "ssa", "Method": "External"},
+                {"Format": "smi", "Method": "Embed"},
+                {"Format": "smi", "Method": "External"},
+                # Jellyfin currently refuses to serve these subtitle types as external.
+                {"Format": "pgssub", "Method": "Embed"},
+                # {
+                #    "Format": "pgssub",
+                #    "Method": "External"
+                # },
+                {"Format": "dvdsub", "Method": "Embed"},
+                {"Format": "dvbsub", "Method": "Embed"},
+                # {
+                #    "Format": "dvdsub",
+                #    "Method": "External"
+                # },
+                {"Format": "pgs", "Method": "Embed"},
+                # {
+                #    "Format": "pgs",
+                #    "Method": "External"
+                # }
+            ],
+        }
+        if force_transcode:
+            profile["DirectPlayProfiles"] = []
+        return profile
+
+    def get_playdata(self, *, nowplaying=False, update=False):
+        pd = {
+            "AudioStreamIndex": 1,
+            "BufferedRanges": [{"start": 0, "end": 400000000000}],
+            "CanSeek": False,
+            "IsMuted": False,
+            "IsPaused": False,
+            "ItemId": self.item["Id"],
+            "MaxStreamingBitrate": self.profile["MaxStreamingBitrate"],
+            "MediaSourceId": self.info["MediaSources"][0]["Id"],
+            "PlayMethod": "Transcode",
+            "PlaySessionId": self.info["PlaySessionId"],
+            "PlaybackRate": 10,
+            "PlaybackStartTimeTicks": 10000 * int(self.started_at.timestamp()),
+            "PlaylistItemId": "playlistItem0",
+            "PositionTicks": 0,
+            "RepeatMode": "RepeatNone",
+            "ShuffledMode": "Sorted",
+            "SubtitleStreamIndex": -1,
+            "VolumeLevel": 0
+        }
+        if nowplaying:
+            pd["NowPlayingQueue"] = [{"Id": self.item["Id"], "PlaylistItemId": "playlistItem0"}]
+        if update:
+            pd["EventName"] = "timeupdate"
+        return pd
+
+    def initialize(self):
+        client = JellyfinClient()
+        client.config.app(
+            APP_NAME,
+            '0.0.1',
+            socket.gethostname(),
+            hashlib.md5(str(uuid.getnode()).encode()).hexdigest()
+        )
+        client.config.data["auth.ssl"] = True
+
+        client.auth.connect_to_address(SERVER_HOST)
+        client.auth.login(SERVER_HOST, USER, PASS)
+
+        credentials = client.auth.credentials.get_credentials()
+        server = credentials["Servers"][0]
+        server["username"] = USER
+        client.authenticate({"Servers": [server]}, discover=False)
+        self.client = client
+
+    def get_item(self, name, category="Videos"):
+        items = self.client.jellyfin.search_media_items(
+            term=name, media=category)["Items"]
+
+        self.item = items[0]
+
+        self.profile = self.get_profile()
+        self.info = self.client.jellyfin.get_play_info(self.item["Id"], self.profile)
+        m3u8_url = SERVER_HOST + self.info["MediaSources"][0]["TranscodingUrl"]
+
+        print(m3u8_url)
+
+        r = requests.get(m3u8_url, timeout=10)
+        r.raise_for_status()
+
+        self.base_url = m3u8_url.rsplit("/", maxsplit=1)[0]
+        master_m3u8_obj = m3u8.loads(r.content.decode("utf-8"))
+
+        r = requests.get(self.base_url + "/" + master_m3u8_obj.playlists[0].uri, timeout=10)
+        r.raise_for_status()
+        self.m3u8_obj = m3u8.loads(r.content.decode("utf-8"))
+
+    async def download_files(self, *, limit=None):
+        try:
+            await self._download_files(limit=limit)
+        except KeyboardInterrupt:
+            print("Interrupted, closing...")
+        finally:
+            self.report_stop()
+            print("Finished")
+
+    async def _download_files(self, *, limit=None):
+        self.started_at = datetime.utcnow()
+        files = [self.base_url + "/" + uri for uri in self.m3u8_obj.files]
+        bigbuffer = b''
+
+        print("Starting session")
+        self.client.jellyfin.session_playing(data=self.get_playdata(nowplaying=True))
+
+        timeout=aiohttp.client.ClientTimeout(total=60, connect=20, sock_connect=20, sock_read=60)
+        headers=None
+        async with aiohttp.ClientSession(
+            headers=headers,
+            raise_for_status=True,
+            timeout=timeout
+        ) as session:
+            await self.download_async(session, files[0])
+
+        start_idx = 1
+        all_files = len(files)
+        if limit and limit < all_files:
+            all_files = limit
+
+        headers = {"X-Buffer-Only": "true"}
+        async with aiohttp.ClientSession(
+            headers=headers,
+            timeout=timeout,
+            raise_for_status=True
+        ) as session:
+            while start_idx < all_files:
+                buffers = await asyncio.gather(
+                    *[asyncio.create_task(self.download_async(session, files[idx], idx=idx))
+                    for idx in range(start_idx, start_idx + self.parallel)]
+                )
+
+                buffers.sort(key=lambda i: i[0])
+                for _, buffer in buffers:
+                    bigbuffer += buffer
+                if len(bigbuffer) > DUMP_EVERY:
+                    print("Dumping...")
+                    with open("final.mp4", "ab") as f:
+                        f.write(bigbuffer)
+                    bigbuffer = b''
+
+                self.report_progress()
+                start_idx += self.parallel
+
+    def report_progress(self):
+        print("Progress update")
+        self.client.jellyfin.session_progress(data=self.get_playdata(update=True))
+
+    def report_stop(self):
+        print("Reporting finish")
+        self.client.jellyfin.session_stop(data=self.get_playdata(nowplaying=True))
+
+    @backoff.on_exception(
+        backoff.expo,
+        (aiohttp.ClientError,),
+        on_backoff=backoff_hdlr,
+        max_time=60,
+        max_tries=7)
+    async def download_async(self, session: "aiohttp.ClientSession", url: str, *, idx=None):
+        async with session.get(url) as response:
+            data = await response.read()
+            return idx, data
