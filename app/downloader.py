@@ -1,6 +1,7 @@
 from jellyfin_apiclient_python import JellyfinClient
 from typing import Optional
 from datetime import datetime
+from contextlib import suppress
 
 import requests
 import m3u8
@@ -170,7 +171,8 @@ class Downloader:
         iteminfo = self.client.jellyfin.get_item(self.item["Id"])
 
         self.profile = self.get_profile(h265=config["client"]["prefer_h265"])
-        self.info = self.client.jellyfin.get_play_info(self.item["Id"], self.profile, sid=0)
+        self.info = self.client.jellyfin.get_play_info(
+            self.item["Id"], self.profile, sid=0, start_time_ticks=0)
 
         try:
             self.subtitle_url = SERVER_HOST + self.info['MediaSources'][0]['MediaStreams'][0]['DeliveryUrl']
@@ -218,6 +220,9 @@ class Downloader:
 
         print("Starting session")
         self.client.jellyfin.session_playing(data=self.get_playdata(nowplaying=True))
+
+        with suppress(FileNotFoundError):
+            os.unlink("final.mp4")
 
         async with aiohttp.ClientSession(
             raise_for_status=True,
