@@ -172,7 +172,11 @@ class Downloader:
         self.profile = self.get_profile(h265=config["client"]["prefer_h265"])
         self.info = self.client.jellyfin.get_play_info(self.item["Id"], self.profile, sid=0)
 
-        self.subtitle_url = SERVER_HOST + self.info['MediaSources'][0]['MediaStreams'][0]['DeliveryUrl']
+        try:
+            self.subtitle_url = SERVER_HOST + self.info['MediaSources'][0]['MediaStreams'][0]['DeliveryUrl']
+        except KeyError:
+            self.subtitle_url = None
+
         m3u8_url = SERVER_HOST + self.info["MediaSources"][0]["TranscodingUrl"]
 
         print(m3u8_url)
@@ -188,6 +192,9 @@ class Downloader:
         self.m3u8_obj = m3u8.loads(r.content.decode("utf-8"))
 
     async def download_subtitles(self):
+        if not self.subtitle_url:
+            return
+
         async with aiohttp.ClientSession(
             raise_for_status=True,
             timeout=TIMEOUT_CONFIG
