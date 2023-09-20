@@ -2,6 +2,8 @@ from jellyfin_apiclient_python import JellyfinClient
 from typing import Optional
 from datetime import datetime
 from contextlib import suppress
+from tqdm import tqdm
+from simple_term_menu import TerminalMenu
 
 import requests
 import m3u8
@@ -29,8 +31,8 @@ KEEP_PARTIALS = config["client"]["keep_partials"]
 def backoff_msg(details):
     args = details["args"]
     filename = args[2].split("/")[-1].split("?")[0]
-    print("Backing off {wait:0.1f} seconds after {tries} tries for file {filename}".format(
-        wait=details["wait"], filename=filename, tries=details["tries"]))
+    # print("Backing off {wait:0.1f} seconds after {tries} tries for file {filename}".format(
+    #     wait=details["wait"], filename=filename, tries=details["tries"]))
 
 
 class Downloader:
@@ -206,15 +208,6 @@ class Downloader:
             f.write(data)
 
     async def download_files(self, *, limit=None):
-        try:
-            await self._download_files(limit=limit)
-        except KeyboardInterrupt:
-            print("Interrupted, closing...")
-        finally:
-            self.report_stop()
-            print("Finished")
-
-    async def _download_files(self, *, limit=None):
         self.started_at = datetime.utcnow()
         files = [self.base_url + "/" + uri for uri in self.m3u8_obj.files]
 
@@ -236,31 +229,33 @@ class Downloader:
             all_files = limit
 
         headers = {"X-Buffer-Only": "true"}
-        async with aiohttp.ClientSession(
-            headers=headers,
-            timeout=TIMEOUT_CONFIG,
-            raise_for_status=True
-        ) as session:
-            while start_idx < all_files:
-                buffers = await asyncio.gather(
-                    *[asyncio.create_task(self.download_async(session, files[idx], idx=idx))
-                    for idx in range(start_idx, start_idx + self.parallel)]
-                )
+        with tqdm(total=100) as pbar:
+            async with aiohttp.ClientSession(
+                headers=headers,
+                timeout=TIMEOUT_CONFIG,
+                raise_for_status=True
+            ) as session:
+                while start_idx < all_files:
+                    buffers = await asyncio.gather(
+                        *[asyncio.create_task(self.download_async(session, files[idx], idx=idx))
+                        for idx in range(start_idx, start_idx + self.parallel)]
+                    )
 
-                buffers.sort(key=lambda i: i[0])
-                for _, buffer in buffers:
-                    bigbuffer += buffer
-                if len(bigbuffer) > DUMP_EVERY:
-                    print("Dumping...")
-                    with open("final.mp4", "ab") as f:
-                        f.write(bigbuffer)
-                    bigbuffer = b''
+                    buffers.sort(key=lambda i: i[0])
+                    for _, buffer in buffers:
+                        bigbuffer += buffer
+                    if len(bigbuffer) > DUMP_EVERY:
+                        # print("Dumping...")
+                        with open("final.mp4", "ab") as f:
+                            f.write(bigbuffer)
+                        bigbuffer = b''
 
-                self.report_progress()
-                start_idx += self.parallel
+                    self.report_progress()
+                    start_idx += self.parallel
+                    pbar.update(100 * self.parallel / all_files)
 
     def report_progress(self):
-        print("Progress update")
+        # print("Progress update")
         self.client.jellyfin.session_progress(data=self.get_playdata(update=True))
 
     def report_stop(self):
