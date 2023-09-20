@@ -16,6 +16,7 @@ import hashlib
 import os
 
 from .settings import config
+from .helpers import human_readable_to_bytes, item_by_id
 
 
 APP_NAME = "JellyfinDownloader"
@@ -35,10 +36,6 @@ def backoff_msg(details):
     #     wait=details["wait"], filename=filename, tries=details["tries"]))
 
 
-def item_by_id(items, id: str, *, key="Id"):
-    return next(filter(lambda i: i.get(key) == id, items), None)
-
-
 class Downloader:
     def __init__(self) -> None:
         self.client = None
@@ -53,8 +50,8 @@ class Downloader:
     @classmethod
     def get_profile(
         cls,
+        video_bitrate: int,
         is_remote: bool = False,
-        video_bitrate: Optional[int] = 4000,
         force_transcode: bool = True,
         h265: bool = False
     ):
@@ -69,8 +66,8 @@ class Downloader:
         audio_transcode_codecs = "aac,mp3,ac3,opus,flac,vorbis"
         profile = {
             "Name": "jellyfin-downloader",
-            "MaxStreamingBitrate": video_bitrate * 1000,
-            "MaxStaticBitrate": video_bitrate * 1000,
+            "MaxStreamingBitrate": video_bitrate,
+            "MaxStaticBitrate": video_bitrate,
             "MusicStreamingTranscodingBitrate": 1920000,
             "TimelineOffsetSeconds": 5,
             "TranscodingProfiles": [
@@ -174,6 +171,9 @@ class Downloader:
 
         items = self.client.jellyfin.search_media_items(
             term=term, media=category)["Items"]
+        if not items:
+            print("Nothing matched your criteria")
+            raise RuntimeError
 
         choice = TerminalMenu([f'{item["Name"]} [{item["ProductionYear"]}]' for item in items]).show()
 
@@ -195,7 +195,12 @@ class Downloader:
             choice = TerminalMenu([f'[{source["Language"]}] {source["DisplayTitle"]}' for source in subtitle_streams], title="Pick subtitles").show()
             sid = subtitle_streams[choice]["Index"]
 
-        self.profile = self.get_profile(h265=config["client"]["prefer_h265"])
+        bitrate = input("Provide bitrate [K/M]: ")
+        if not bitrate.endswith(("K", "M")):
+            bitrate += "K"
+        bitrate = human_readable_to_bytes(bitrate)
+
+        self.profile = self.get_profile(video_bitrate=bitrate, h265=config["client"]["prefer_h265"])
         self.info = self.client.jellyfin.get_play_info(
             source["Id"], self.profile, aid=aid, sid=sid, start_time_ticks=0)
         media_source = item_by_id(self.info['MediaSources'], source["Id"])
