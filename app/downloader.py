@@ -25,7 +25,7 @@ PASS = config["authentication"]["pass"]
 SERVER_HOST = config["server"]["url"]
 CONNECTIONS = config["client"]["connections"]
 DUMP_EVERY = config["client"]["buffersize"]
-TIMEOUT_CONFIG = aiohttp.client.ClientTimeout(total=60, connect=20, sock_connect=20, sock_read=60)
+TIMEOUT_CONFIG = aiohttp.client.ClientTimeout(total=180, connect=30, sock_connect=30, sock_read=180)
 KEEP_PARTIALS = config["client"]["keep_partials"]
 
 
