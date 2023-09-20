@@ -35,6 +35,10 @@ def backoff_msg(details):
     #     wait=details["wait"], filename=filename, tries=details["tries"]))
 
 
+def item_by_id(items, id: str, *, key="Id"):
+    return next(filter(lambda i: i.get(key) == id, items), None)
+
+
 class Downloader:
     def __init__(self) -> None:
         self.client = None
@@ -165,25 +169,47 @@ class Downloader:
         client.authenticate({"Servers": [server]}, discover=False)
         self.client = client
 
-    def get_item(self, name, category="Videos"):
-        items = self.client.jellyfin.search_media_items(
-            term=name, media=category)["Items"]
+    def choose_item(self, category="Videos"):
+        term = input("Provide search term: ")
 
-        self.item = items[0]
-        iteminfo = self.client.jellyfin.get_item(self.item["Id"])
+        items = self.client.jellyfin.search_media_items(
+            term=term, media=category)["Items"]
+
+        choice = TerminalMenu([f'{item["Name"]} [{item["ProductionYear"]}]' for item in items]).show()
+
+        self.item = items[choice]
+        self.iteminfo = self.client.jellyfin.get_item(self.item["Id"])
+
+        source_id = 0
+        sid = None
+        aid = None
+        if len(self.iteminfo['MediaSources']) > 1:
+            source_id = TerminalMenu([source["Name"] for source in self.iteminfo['MediaSources']], title="Choose version").show()
+        source = self.iteminfo["MediaSources"][source_id]
+        audio_streams = [stream for stream in source["MediaStreams"] if stream["Type"] == "Audio"]
+        if len(audio_streams) > 1:
+            choice = TerminalMenu([f'[{source["Language"]}] {source["DisplayTitle"]}' for source in audio_streams], title="Choose audio").show()
+            aid = audio_streams[choice]["Index"]
+        subtitle_streams = [stream for stream in source["MediaStreams"] if stream["Type"] == "Subtitle"]
+        if subtitle_streams:
+            choice = TerminalMenu([f'[{source["Language"]}] {source["DisplayTitle"]}' for source in subtitle_streams], title="Pick subtitles").show()
+            sid = subtitle_streams[choice]["Index"]
 
         self.profile = self.get_profile(h265=config["client"]["prefer_h265"])
         self.info = self.client.jellyfin.get_play_info(
-            self.item["Id"], self.profile, sid=0, start_time_ticks=0)
+            source["Id"], self.profile, aid=aid, sid=sid, start_time_ticks=0)
+        media_source = item_by_id(self.info['MediaSources'], source["Id"])
 
-        try:
-            self.subtitle_url = SERVER_HOST + self.info['MediaSources'][0]['MediaStreams'][0]['DeliveryUrl']
-        except KeyError:
-            self.subtitle_url = None
+        self.subtitle_url = None
+        if sid is not None:
+            try:
+                self.subtitle_url = SERVER_HOST + media_source['MediaStreams'][sid]['DeliveryUrl']
+            except KeyError:
+                pass
 
         m3u8_url = SERVER_HOST + self.info["MediaSources"][0]["TranscodingUrl"]
 
-        print(m3u8_url)
+        # print(m3u8_url)
 
         r = requests.get(m3u8_url, timeout=10)
         r.raise_for_status()
