@@ -221,12 +221,21 @@ class Downloader:
         self.profile = self.get_profile(video_bitrate=bitrate, h265=config["client"]["prefer_h265"])
         self.info = self.client.jellyfin.get_play_info(
             source["Id"], self.profile, aid=aid, sid=sid, start_time_ticks=0)
-        media_source = item_by_id(self.info['MediaSources'], source["Id"])
+        self.media_source = item_by_id(self.info['MediaSources'], source["Id"])
+
+        self.expected_size_mb = round((
+            self.media_source["Size"] * min(
+                self.profile['MaxStreamingBitrate'], self.media_source["Bitrate"]
+            ) / self.media_source["Bitrate"]
+        ) / (1024 * 1024), 2)
+        proceed = input(f"Estimating transcoded file to be around {self.expected_size_mb} MB. Proceed? [Y/n] ")
+        if proceed == "n":
+            raise KeyboardInterrupt("Interrupting")
 
         self.subtitle_url = None
         if sid is not None:
             try:
-                self.subtitle_url = SERVER_HOST + media_source['MediaStreams'][sid]['DeliveryUrl']
+                self.subtitle_url = SERVER_HOST + self.media_source['MediaStreams'][sid]['DeliveryUrl']
             except KeyError:
                 pass
 
@@ -266,18 +275,27 @@ class Downloader:
         with suppress(FileNotFoundError):
             os.remove("final.mp4")
 
-        async with aiohttp.ClientSession(
-            raise_for_status=True,
-            timeout=TIMEOUT_CONFIG
-        ) as session:
-            _, _, bigbuffer = await self.download_async(session, files[0])
-
         start_idx = 1
         all_files = len(files)
+        expected_size = self.expected_size_mb
         if limit and limit < all_files:
+            expected_size = round(expected_size * limit / all_files, 2)
             all_files = limit
 
-        with tqdm(total=100) as pbar:
+        with tqdm(
+            total=expected_size,
+            unit="MB",
+            # bar_format='{l_bar}{bar}| {n_fmt:0.2f}/{total_fmt:0.2f} [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
+        ) as pbar:
+            def pbar_update(buffer: bytes):
+                pbar.update(len(buffer) / (1024 * 1024))
+
+            async with aiohttp.ClientSession(
+                raise_for_status=True,
+                timeout=TIMEOUT_CONFIG
+            ) as session:
+                _, _, bigbuffer = await self.download_async(session, files[0])
+
             async with aiohttp.ClientSession(
                 headers={"X-Buffer-Only": "true"},
                 timeout=TIMEOUT_CONFIG,
@@ -295,11 +313,11 @@ class Downloader:
                     if len(bigbuffer) > DUMP_EVERY:
                         with open("final.mp4", "ab") as f:
                             f.write(bigbuffer)
+                        pbar_update(bigbuffer)
                         bigbuffer = b''
 
                     self.report_progress()
                     start_idx += self.parallel
-                    pbar.update(100 * self.parallel / all_files)
 
     def report_progress(self):
         # print("Progress update")
