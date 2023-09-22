@@ -175,7 +175,11 @@ class Downloader:
             print("Nothing matched your criteria")
             raise RuntimeError
 
-        choice = TerminalMenu([f'{item["Name"]} [{item["ProductionYear"]}]' for item in items]).show()
+        def _get_item_name(item):
+            production_year = item.get("ProductionYear", "Unknown")
+            return f'{item["Name"]} [{production_year}]'
+
+        choice = TerminalMenu([_get_item_name(item) for item in items]).show()
 
         self.item = items[choice]
         self.iteminfo = self.client.jellyfin.get_item(self.item["Id"])
@@ -235,8 +239,8 @@ class Downloader:
             timeout=TIMEOUT_CONFIG
         ) as session:
             _, data = await self.download_async(session, self.subtitle_url)
-        with open("final.PL.srt", "wb") as f:
-            f.write(data)
+        with open("final.PL.srt", "w") as f:
+            f.write(data.decode())
 
     async def download_files(self, *, limit=None):
         self.started_at = datetime.utcnow()
@@ -246,7 +250,7 @@ class Downloader:
         self.client.jellyfin.session_playing(data=self.get_playdata(nowplaying=True))
 
         with suppress(FileNotFoundError):
-            os.unlink("final.mp4")
+            os.remove("final.mp4")
 
         async with aiohttp.ClientSession(
             raise_for_status=True,
@@ -275,7 +279,6 @@ class Downloader:
                     for _, buffer in buffers:
                         bigbuffer += buffer
                     if len(bigbuffer) > DUMP_EVERY:
-                        # print("Dumping...")
                         with open("final.mp4", "ab") as f:
                             f.write(bigbuffer)
                         bigbuffer = b''
