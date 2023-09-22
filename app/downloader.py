@@ -259,10 +259,9 @@ class Downloader:
         if limit and limit < all_files:
             all_files = limit
 
-        headers = {"X-Buffer-Only": "true"}
         with tqdm(total=100) as pbar:
             async with aiohttp.ClientSession(
-                headers=headers,
+                headers={"X-Buffer-Only": "true"},
                 timeout=TIMEOUT_CONFIG,
                 raise_for_status=True
             ) as session:
