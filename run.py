@@ -8,7 +8,7 @@ if __name__ == "__main__":
 
     try:
         d.choose_item()
-    except (TypeError, KeyboardInterrupt):
+    except (KeyboardInterrupt, ):
         print("Interrupted, closing...")
         exit(0)
 

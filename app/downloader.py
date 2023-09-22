@@ -166,7 +166,11 @@ class Downloader:
         client.authenticate({"Servers": [server]}, discover=False)
         self.client = client
 
-    def choose_item(self, category="Videos"):
+    def choose_item(self):
+        categories = ["Movies", "Series"]
+        category_id = TerminalMenu([category for category in categories]).show()
+        category = categories[category_id]
+
         term = input("Provide search term: ")
 
         items = self.client.jellyfin.search_media_items(
@@ -183,6 +187,16 @@ class Downloader:
 
         self.item = items[choice]
         self.iteminfo = self.client.jellyfin.get_item(self.item["Id"])
+
+        if category == "Series":
+            seasons = self.client.jellyfin.get_seasons(self.iteminfo["Id"])
+            season_id = TerminalMenu([season["Name"] for season in seasons["Items"]], title="Choose season").show()
+            season = seasons["Items"][season_id]
+
+            episodes = self.client.jellyfin.get_season(self.iteminfo["Id"], season["Id"])
+            episode_id = TerminalMenu([episode["Name"] for episode in episodes["Items"]], title="Choose episode").show()
+            episode = episodes["Items"][episode_id]
+            self.iteminfo = self.client.jellyfin.get_item(episode["Id"])
 
         source_id = 0
         sid = None
@@ -238,9 +252,9 @@ class Downloader:
             raise_for_status=True,
             timeout=TIMEOUT_CONFIG
         ) as session:
-            _, data = await self.download_async(session, self.subtitle_url)
+            _, response, _ = await self.download_async(session, self.subtitle_url)
         with open("final.PL.srt", "w") as f:
-            f.write(data.decode())
+            f.write(await response.text())
 
     async def download_files(self, *, limit=None):
         self.started_at = datetime.utcnow()
@@ -256,7 +270,7 @@ class Downloader:
             raise_for_status=True,
             timeout=TIMEOUT_CONFIG
         ) as session:
-            _, bigbuffer = await self.download_async(session, files[0])
+            _, _, bigbuffer = await self.download_async(session, files[0])
 
         start_idx = 1
         all_files = len(files)
@@ -276,7 +290,7 @@ class Downloader:
                     )
 
                     buffers.sort(key=lambda i: i[0])
-                    for _, buffer in buffers:
+                    for _, _, buffer in buffers:
                         bigbuffer += buffer
                     if len(bigbuffer) > DUMP_EVERY:
                         with open("final.mp4", "ab") as f:
@@ -307,4 +321,4 @@ class Downloader:
             if KEEP_PARTIALS:
                 with open(os.path.join("downloads", url.split("/")[-1].split("?")[0]), "wb") as f:
                     f.write(data)
-            return idx, data
+            return idx, response, data
