@@ -98,7 +98,7 @@ class Downloader:
                     "Protocol": "hls",
                     "AudioCodec": audio_transcode_codecs,
                     "VideoCodec": transcode_codecs,
-                    "MaxAudioChannels": "6",
+                    "MaxAudioChannels": "2",
                 },
                 {"Container": "jpeg", "Type": "Photo"},
             ],
@@ -324,7 +324,7 @@ class Downloader:
             return
 
         response, _ = await self.download(self.subtitle_url)
-        self._save(None, await response.text(), self.download_path, filename="final.PL.srt")
+        self._save(None, await response.text(), filepath=self.output_subtitle_file)
 
     async def download_files(self):
         self.started_at = datetime.utcnow()
@@ -398,11 +398,11 @@ class Downloader:
         print("Reporting finish")
         self.client.jellyfin.session_stop(data=self.get_playdata(nowplaying=True))
 
-    def _save(self, url: Optional[str], data: Union[bytes, str], dir: str, filename: Optional[str] = None):
+    def _save(self, url: Optional[str], data: Union[bytes, str], dir: Optional[str] = None, filepath: Optional[str] = None):
         mode = "wb" if isinstance(data, bytes) else "w"
-        if not filename:
-            filename = url.split("/")[-1].split("?")[0]
-        with open(os.path.join(dir, filename), mode) as f:
+        if not filepath:
+            filepath = os.path.join(dir, url.split("/")[-1].split("?")[0])
+        with open(filepath, mode) as f:
             f.write(data)
 
     @backoff.on_exception(
