@@ -333,7 +333,7 @@ class Downloader:
 
         print("Starting session")
         if os.path.exists(self.output_video_file):
-            confirm = input("File already exists, overwrite? [y/N]")
+            confirm = input("File already exists, overwrite? [y/N] ")
             if confirm != "y":
                 return
 
