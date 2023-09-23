@@ -4,6 +4,7 @@ from contextlib import suppress
 from tqdm import tqdm
 from simple_term_menu import TerminalMenu
 from urllib.parse import urlparse, urlunparse, parse_qsl
+from typing import Optional, Union
 
 import m3u8
 import asyncio
@@ -26,11 +27,12 @@ CONNECTIONS = config["client"]["connections"]
 DUMP_EVERY = config["client"]["buffersize"]
 TIMEOUT_CONFIG = aiohttp.client.ClientTimeout(total=180, connect=30, sock_connect=30, sock_read=180)
 KEEP_PARTIALS = config["client"]["keep_partials"]
+DOWNLOAD_DIR = config["client"]["download_dir"]
 
 
 def backoff_msg(details):
     args = details["args"]
-    filename = args[2].split("/")[-1].split("?")[0]
+    filename = args[1].split("/")[-1].split("?")[0]
     # print("Backing off {wait:0.1f} seconds after {tries} tries for file {filename}".format(
     #     wait=details["wait"], filename=filename, tries=details["tries"]))
 
@@ -47,14 +49,23 @@ class Downloader:
         self.started_at = None
         self.parallel = CONNECTIONS
 
-        self.download_path = "downloads"
-        self.output_filename = "final"
-        self.output_video_file = os.path.join(self.download_path, f"{self.output_filename}.mp4")
-        self.output_subtitle_file = os.path.join(self.download_path, f"{self.output_filename}.srt")
-        self.status_file = os.path.join(self.download_path, f"{self.output_filename}.status")
+        self.download_path = DOWNLOAD_DIR
+        self.output_filename = None
 
         self.partials_path = os.path.join(self.download_path, "partials")
         os.makedirs(self.partials_path, exist_ok=True)
+
+    @property
+    def output_video_file(self):
+        return os.path.join(self.download_path, f"{self.output_filename}.mp4")
+
+    @property
+    def output_subtitle_file(self):
+        return os.path.join(self.download_path, f"{self.output_filename}.srt")
+
+    @property
+    def status_file(self):
+        return os.path.join(self.download_path, f"{self.output_filename}.status")
 
     @classmethod
     def get_profile(
@@ -197,6 +208,9 @@ class Downloader:
         self.item = items[choice]
         self.iteminfo = self.client.jellyfin.get_item(self.item["Id"])
 
+        self.download_path = os.path.join(self.download_path, category)
+        self.output_filename = _get_item_name(self.item)
+
         if category == "Series":
             seasons = self.client.jellyfin.get_seasons(self.iteminfo["Id"])
             season_id = TerminalMenu([season["Name"] for season in seasons["Items"]], title="Choose season").show()
@@ -207,6 +221,12 @@ class Downloader:
             episode = episodes["Items"][episode_id]
             self.iteminfo = self.client.jellyfin.get_item(episode["Id"])
 
+            self.download_path = os.path.join(self.download_path, _get_item_name(self.item), season["Name"])
+            self.output_filename = episode["Name"]
+            self.info = episode
+
+        os.makedirs(self.download_path, exist_ok=True)
+
         source_id = 0
         sid = None
         aid = None
@@ -215,11 +235,11 @@ class Downloader:
         source = self.iteminfo["MediaSources"][source_id]
         audio_streams = [stream for stream in source["MediaStreams"] if stream["Type"] == "Audio"]
         if len(audio_streams) > 1:
-            choice = TerminalMenu([f'[{source["Language"]}] {source["DisplayTitle"]}' for source in audio_streams], title="Choose audio").show()
+            choice = TerminalMenu([f'[{source.get("Language", "und")}] {source["DisplayTitle"]}' for source in audio_streams], title="Choose audio").show()
             aid = audio_streams[choice]["Index"]
         subtitle_streams = [stream for stream in source["MediaStreams"] if stream["Type"] == "Subtitle"]
         if subtitle_streams:
-            choice = TerminalMenu([f'[{source["Language"]}] {source["DisplayTitle"]}' for source in subtitle_streams], title="Pick subtitles").show()
+            choice = TerminalMenu([f'[{source.get("Language", "und")}] {source["DisplayTitle"]}' for source in subtitle_streams], title="Pick subtitles").show()
             sid = subtitle_streams[choice]["Index"]
 
         bitrate = input("Provide bitrate [K/M]: ")
@@ -280,8 +300,11 @@ class Downloader:
         return _unparse(p_current, p_current_query) == _unparse(p_url, p_url_query)
 
     def _resume_download(self) -> int:
-        with open(self.status_file, "r") as f:
-            transcode_url, idx = f.readlines()
+        try:
+            with open(self.status_file, "r") as f:
+                transcode_url, idx = f.readlines()
+        except FileNotFoundError:
+            return 0
         if self._validate_transcode_url(transcode_url):
             confirm = input("There is incomplete session for this item, resume? [Y/n]")
             if confirm == "n":
@@ -367,7 +390,7 @@ class Downloader:
         print("Reporting finish")
         self.client.jellyfin.session_stop(data=self.get_playdata(nowplaying=True))
 
-    def _save(self, url: str | None, data: bytes | str, dir: str, filename: str | None = None):
+    def _save(self, url: Optional[str], data: Union[bytes, str], dir: str, filename: Optional[str] = None):
         mode = "wb" if isinstance(data, bytes) else "w"
         if not filename:
             filename = url.split("/")[-1].split("?")[0]

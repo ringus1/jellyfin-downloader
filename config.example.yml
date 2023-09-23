@@ -10,3 +10,4 @@ client:
   buffersize: 10M
   keep_partials: false
   prefer_h265: true
+  download_dir: downloads

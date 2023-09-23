@@ -5,4 +5,6 @@ config.yml
 *.vtt
 *.txt
 .vscode/
+.DS_Store
 __pycache__
+downloads/

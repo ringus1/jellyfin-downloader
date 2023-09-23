@@ -2,21 +2,25 @@ import asyncio
 from app.downloader import Downloader
 
 
-if __name__ == "__main__":
+async def run_app():
     d = Downloader()
     d.initialize()
 
     try:
-        asyncio.run(d.choose_item())
+        await d.choose_item()
     except (KeyboardInterrupt, ):
         print("Interrupted, closing...")
-        exit(0)
+        return
 
     try:
-        asyncio.run(d.download_subtitles())
-        asyncio.run(d.download_files())
+        await d.download_subtitles()
+        await d.download_files()
     except KeyboardInterrupt:
         print("Interrupted, closing...")
     finally:
         d.report_stop()
         print("Finished")
+
+
+if __name__ == "__main__":
+    asyncio.run(run_app())
