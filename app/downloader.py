@@ -44,6 +44,7 @@ class Downloader:
         self.profile = None
         self.info = None
         self.base_url = None
+        self.subtitle_url = None
         self.transcode_url = None
         self.m3u8_obj = None
         self.started_at = None
@@ -261,7 +262,6 @@ class Downloader:
         if proceed == "n":
             raise KeyboardInterrupt("Interrupting")
 
-        self.subtitle_url = None
         if sid is not None:
             try:
                 self.subtitle_url = SERVER_HOST + self.media_source['MediaStreams'][sid]['DeliveryUrl']
