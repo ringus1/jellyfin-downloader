@@ -1,11 +1,10 @@
 from jellyfin_apiclient_python import JellyfinClient
-from typing import Optional
 from datetime import datetime
 from contextlib import suppress
 from tqdm import tqdm
 from simple_term_menu import TerminalMenu
+from urllib.parse import urlparse, urlunparse, parse_qsl
 
-import requests
 import m3u8
 import asyncio
 import aiohttp
@@ -43,9 +42,19 @@ class Downloader:
         self.profile = None
         self.info = None
         self.base_url = None
+        self.transcode_url = None
         self.m3u8_obj = None
         self.started_at = None
         self.parallel = CONNECTIONS
+
+        self.download_path = "downloads"
+        self.output_filename = "final"
+        self.output_video_file = os.path.join(self.download_path, f"{self.output_filename}.mp4")
+        self.output_subtitle_file = os.path.join(self.download_path, f"{self.output_filename}.srt")
+        self.status_file = os.path.join(self.download_path, f"{self.output_filename}.status")
+
+        self.partials_path = os.path.join(self.download_path, "partials")
+        os.makedirs(self.partials_path, exist_ok=True)
 
     @classmethod
     def get_profile(
@@ -166,7 +175,7 @@ class Downloader:
         client.authenticate({"Servers": [server]}, discover=False)
         self.client = client
 
-    def choose_item(self):
+    async def choose_item(self):
         categories = ["Movies", "Series"]
         category_id = TerminalMenu([category for category in categories]).show()
         category = categories[category_id]
@@ -239,33 +248,62 @@ class Downloader:
             except KeyError:
                 pass
 
-        m3u8_url = SERVER_HOST + self.info["MediaSources"][0]["TranscodingUrl"]
+        self.transcode_url = SERVER_HOST + self.info["MediaSources"][0]["TranscodingUrl"]
+        self.base_url = self.transcode_url.rsplit("/", maxsplit=1)[0]
 
-        # print(m3u8_url)
+        r, _ = await self.download(self.transcode_url)
+        master_m3u8_obj = m3u8.loads(await r.text())
 
-        r = requests.get(m3u8_url, timeout=10)
-        r.raise_for_status()
+        r, _ = await self.download(self.base_url + "/" + master_m3u8_obj.playlists[0].uri)
+        self.m3u8_obj = m3u8.loads(await r.text())
 
-        self.base_url = m3u8_url.rsplit("/", maxsplit=1)[0]
-        master_m3u8_obj = m3u8.loads(r.content.decode("utf-8"))
+    def _validate_transcode_url(self, url) -> bool:
+        ignored_params = ("DeviceId", "PlaySessionId", "api_key")
+        def _filtered_params(query_params: bytes):
+            return "&".join([
+                f"{k}={v}"
+                for k, v in parse_qsl(query_params)
+                if k not in ignored_params
+            ])
 
-        r = requests.get(self.base_url + "/" + master_m3u8_obj.playlists[0].uri, timeout=10)
-        r.raise_for_status()
-        self.m3u8_obj = m3u8.loads(r.content.decode("utf-8"))
+        def _unparse(p, query):
+            return urlunparse([
+                p.scheme, p.netloc, p.path,
+                p.params, query, p.fragment])
+
+        p_current = urlparse(self.transcode_url)
+        p_current_query = _filtered_params(p_current.query)
+
+        p_url = urlparse(url)
+        p_url_query = _filtered_params(p_url.query)
+
+        return _unparse(p_current, p_current_query) == _unparse(p_url, p_url_query)
+
+    def _resume_download(self) -> int:
+        with open(self.status_file, "r") as f:
+            transcode_url, idx = f.readlines()
+        if self._validate_transcode_url(transcode_url):
+            confirm = input("There is incomplete session for this item, resume? [Y/n]")
+            if confirm == "n":
+                return 0
+            return int(idx)
+
+    def _save_download_status(self, current_idx: int):
+        with open(self.status_file, "w") as f:
+            f.write(self.transcode_url + "\n" + str(current_idx))
+
+    def _cleanup_tmps(self):
+        os.rename(f"{self.output_video_file}.part", self.output_video_file)
+        os.remove(self.status_file)
 
     async def download_subtitles(self):
         if not self.subtitle_url:
             return
 
-        async with aiohttp.ClientSession(
-            raise_for_status=True,
-            timeout=TIMEOUT_CONFIG
-        ) as session:
-            _, response, _ = await self.download_async(session, self.subtitle_url)
-        with open("final.PL.srt", "w") as f:
-            f.write(await response.text())
+        response, _ = await self.download(self.subtitle_url)
+        self._save(None, await response.text(), self.download_path, filename="final.PL.srt")
 
-    async def download_files(self, *, limit=None):
+    async def download_files(self):
         self.started_at = datetime.utcnow()
         files = [self.base_url + "/" + uri for uri in self.m3u8_obj.files]
 
@@ -275,12 +313,10 @@ class Downloader:
         with suppress(FileNotFoundError):
             os.remove("final.mp4")
 
-        start_idx = 1
+        current_idx = self._resume_download()
+        self._save_download_status(0)
         all_files = len(files)
         expected_size = self.expected_size_mb
-        if limit and limit < all_files:
-            expected_size = round(expected_size * limit / all_files, 2)
-            all_files = limit
 
         with tqdm(
             total=expected_size,
@@ -294,30 +330,34 @@ class Downloader:
                 raise_for_status=True,
                 timeout=TIMEOUT_CONFIG
             ) as session:
-                _, _, bigbuffer = await self.download_async(session, files[0])
+                _, bigbuffer = await self.download(files[current_idx], session)
+                current_idx += 1
 
             async with aiohttp.ClientSession(
                 headers={"X-Buffer-Only": "true"},
                 timeout=TIMEOUT_CONFIG,
                 raise_for_status=True
             ) as session:
-                while start_idx < all_files:
+                while current_idx < all_files:
                     buffers = await asyncio.gather(
-                        *[asyncio.create_task(self.download_async(session, files[idx], idx=idx))
-                        for idx in range(start_idx, start_idx + self.parallel)]
+                        *[asyncio.create_task(self.download(files[idx], session, idx=idx))
+                        for idx in range(current_idx, current_idx + self.parallel)]
                     )
+                    current_idx += self.parallel
 
                     buffers.sort(key=lambda i: i[0])
                     for _, _, buffer in buffers:
                         bigbuffer += buffer
+
                     if len(bigbuffer) > DUMP_EVERY:
-                        with open("final.mp4", "ab") as f:
+                        with open(f"{self.output_video_file}.part", "ab") as f:
                             f.write(bigbuffer)
+                        self._save_download_status(current_idx)
                         pbar_update(bigbuffer)
                         bigbuffer = b''
 
                     self.report_progress()
-                    start_idx += self.parallel
+        self._cleanup_tmps()
 
     def report_progress(self):
         # print("Progress update")
@@ -327,16 +367,34 @@ class Downloader:
         print("Reporting finish")
         self.client.jellyfin.session_stop(data=self.get_playdata(nowplaying=True))
 
+    def _save(self, url: str | None, data: bytes | str, dir: str, filename: str | None = None):
+        mode = "wb" if isinstance(data, bytes) else "w"
+        if not filename:
+            filename = url.split("/")[-1].split("?")[0]
+        with open(os.path.join(dir, filename), mode) as f:
+            f.write(data)
+
     @backoff.on_exception(
         backoff.expo,
         (aiohttp.ClientError, aiohttp.client.ClientConnectionError),
         on_backoff=backoff_msg,
         max_time=60,
         max_tries=7)
-    async def download_async(self, session: "aiohttp.ClientSession", url: str, *, idx=None):
-        async with session.get(url) as response:
-            data = await response.read()
-            if KEEP_PARTIALS:
-                with open(os.path.join("downloads", url.split("/")[-1].split("?")[0]), "wb") as f:
-                    f.write(data)
-            return idx, response, data
+    async def download(self, url: str, session: "aiohttp.ClientSession" = None, *, idx = None):
+        async def _inner(session: "aiohttp.ClientSession"):
+            async with session.get(url) as response:
+                data = await response.read()
+                if KEEP_PARTIALS:
+                    self._save(url, data, self.partials_path)
+                if idx:
+                    return idx, response, data
+                return response, data
+
+        if session is None:
+            async with aiohttp.ClientSession(
+                raise_for_status=True,
+                timeout=TIMEOUT_CONFIG
+            ) as session:
+                return await _inner(session)
+        else:
+            return await _inner(session)

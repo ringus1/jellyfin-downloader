@@ -7,7 +7,7 @@ if __name__ == "__main__":
     d.initialize()
 
     try:
-        d.choose_item()
+        asyncio.run(d.choose_item())
     except (KeyboardInterrupt, ):
         print("Interrupted, closing...")
         exit(0)
