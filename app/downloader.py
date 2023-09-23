@@ -329,21 +329,29 @@ class Downloader:
     async def download_files(self):
         self.started_at = datetime.utcnow()
         files = [self.base_url + "/" + uri for uri in self.m3u8_obj.files]
+        part_file_path = f"{self.output_video_file}.part"
 
         print("Starting session")
+        if os.path.exists(self.output_video_file):
+            confirm = input("File already exists, overwrite? [y/N]")
+            if confirm != "y":
+                return
+
         self.client.jellyfin.session_playing(data=self.get_playdata(nowplaying=True))
 
-        with suppress(FileNotFoundError):
-            os.remove("final.mp4")
-
         current_idx = self._resume_download()
-        self._save_download_status(0)
+        self._save_download_status(current_idx)
         all_files = len(files)
         expected_size = self.expected_size_mb
+        initial_size = 0
+
+        if current_idx:
+            initial_size = os.path.getsize(part_file_path) / (1024 * 1024)
 
         with tqdm(
             total=expected_size,
             unit="MB",
+            initial=initial_size,
             # bar_format='{l_bar}{bar}| {n_fmt:0.2f}/{total_fmt:0.2f} [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
         ) as pbar:
             def pbar_update(buffer: bytes):
@@ -373,7 +381,7 @@ class Downloader:
                         bigbuffer += buffer
 
                     if len(bigbuffer) > DUMP_EVERY:
-                        with open(f"{self.output_video_file}.part", "ab") as f:
+                        with open(part_file_path, "ab") as f:
                             f.write(bigbuffer)
                         self._save_download_status(current_idx)
                         pbar_update(bigbuffer)
