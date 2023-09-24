@@ -1,6 +1,5 @@
 from jellyfin_apiclient_python import JellyfinClient
 from datetime import datetime
-from contextlib import suppress
 from tqdm import tqdm
 from simple_term_menu import TerminalMenu
 from urllib.parse import urlparse, urlunparse, parse_qsl

@@ -1,23 +1,39 @@
 import asyncio
 import pickle
 import os
+import glob
+from simple_term_menu import TerminalMenu
+
+from app.settings import config
 from app.downloader import Downloader
+
+DOWNLOAD_DIR = config["client"]["download_dir"]
+
+
+def save_session(downloader: "Downloader"):
+    client = downloader.client
+    downloader.client = None
+    with open(f"{downloader.output_video_file}.session", 'wb') as file:
+        pickle.dump(downloader, file)
+    downloader.client = client
 
 
 async def run_app():
-    old_config = "download_config.pkl"
+    old_sessions = glob.glob(f"{DOWNLOAD_DIR}/**/*.session", recursive=True)
 
     d = None
     resume = False
-    if os.path.exists(old_config):
-        resume = input("Detected previous run, resume? [Y/n] ") != "n"
+    if old_sessions:
+        resume = input("Detected previous run(s), resume? [Y/n] ") != "n"
         if resume:
+            session = old_sessions[TerminalMenu([session for session in old_sessions]).show()]
             try:
-                with open(old_config, "rb") as f:
+                with open(session, "rb") as f:
                     d = pickle.load(f)
             except Exception as e:
-                resume = False
-                print(e)
+                print(f"Failed to open selected session: {e}")
+                return
+
     if d is None:
         d = Downloader()
 
@@ -29,13 +45,12 @@ async def run_app():
         except (KeyboardInterrupt, ):
             print("Interrupted, closing...")
             return
-        with open(old_config, 'wb') as file:
-            pickle.dump(d, file)
+        save_session(d)
 
     try:
         await d.download_subtitles()
         await d.download_files()
-        os.remove(old_config)
+        os.remove(f"{d.output_video_file}.session")
     except KeyboardInterrupt:
         print("Interrupted, closing...")
     finally:
