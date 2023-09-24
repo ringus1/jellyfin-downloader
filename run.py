@@ -4,10 +4,10 @@ import asyncio
 import pickle
 import os
 import glob
-from simple_term_menu import TerminalMenu
 
 from app.settings import config
 from app.downloader import Downloader
+from app.utils import choice_menu
 
 DOWNLOAD_DIR = config["client"]["download_dir"]
 
@@ -28,7 +28,7 @@ async def run_app():
     if old_sessions:
         resume = input("Detected previous run(s), resume? [Y/n] ") != "n"
         if resume:
-            session = old_sessions[TerminalMenu([session for session in old_sessions]).show()]
+            session = choice_menu(old_sessions)
             try:
                 with open(session, "rb") as f:
                     d = pickle.load(f)
