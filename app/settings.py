@@ -1,5 +1,5 @@
 from yaml import safe_load
-from .helpers import human_readable_to_bytes
+from .utils import human_readable_to_bytes
 
 
 with open("config.yml", "r") as f:

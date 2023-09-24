@@ -1,3 +1,13 @@
+from simple_term_menu import TerminalMenu
+from typing import Optional, Iterable, TypeVar, Callable
+
+T = TypeVar('T')
+
+
+def choice_menu(items: Iterable[T], name: Callable[[T], str] = lambda i: i, title: Optional[str] = None) -> Optional[T]:
+    item_id = TerminalMenu([name(i) for i in items], title=title).show()
+    return items[item_id]
+
 
 def human_readable_to_bytes(size: str) -> int:
     try:

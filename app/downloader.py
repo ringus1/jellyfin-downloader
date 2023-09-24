@@ -1,7 +1,6 @@
 from jellyfin_apiclient_python import JellyfinClient
 from datetime import datetime
 from tqdm import tqdm
-from simple_term_menu import TerminalMenu
 from urllib.parse import urlparse, urlunparse, parse_qsl
 from typing import Optional, Union
 
@@ -15,7 +14,7 @@ import hashlib
 import os
 
 from .settings import config
-from .helpers import human_readable_to_bytes, item_by_id
+from .utils import human_readable_to_bytes, item_by_id, choice_menu
 
 
 APP_NAME = "JellyfinDownloader"
@@ -205,8 +204,7 @@ class Downloader:
 
     async def choose_item(self):
         categories = ["Movies", "Series"]
-        category_id = TerminalMenu([category for category in categories]).show()
-        category = categories[category_id]
+        category = choice_menu(categories)
 
         term = input("Provide search term: ")
 
@@ -220,9 +218,7 @@ class Downloader:
             production_year = item.get("ProductionYear", "Unknown")
             return f'{item["Name"]} [{production_year}]'
 
-        choice = TerminalMenu([_get_item_name(item) for item in items]).show()
-
-        self.item = items[choice]
+        self.item = choice_menu(items, _get_item_name)
         self.iteminfo = self.client.jellyfin.get_item(self.item["Id"])
 
         self.download_path = os.path.join(self.download_path, category)
@@ -230,12 +226,10 @@ class Downloader:
 
         if category == "Series":
             seasons = self.client.jellyfin.get_seasons(self.iteminfo["Id"])
-            season_id = TerminalMenu([season["Name"] for season in seasons["Items"]], title="Choose season").show()
-            season = seasons["Items"][season_id]
+            season = choice_menu(seasons["Items"], lambda s: s["Name"], title="Choose season")
 
             episodes = self.client.jellyfin.get_season(self.iteminfo["Id"], season["Id"])
-            episode_id = TerminalMenu([episode["Name"] for episode in episodes["Items"]], title="Choose episode").show()
-            episode = episodes["Items"][episode_id]
+            episode = choice_menu(episodes["Items"], lambda s: s["Name"], title="Choose episode")
             self.iteminfo = self.client.jellyfin.get_item(episode["Id"])
 
             self.download_path = os.path.join(self.download_path, _get_item_name(self.item), season["Name"])
@@ -244,20 +238,20 @@ class Downloader:
 
         os.makedirs(self.download_path, exist_ok=True)
 
-        source_id = 0
+        source = self.iteminfo["MediaSources"][0]
         sid = None
         aid = None
         if len(self.iteminfo['MediaSources']) > 1:
-            source_id = TerminalMenu([source["Name"] for source in self.iteminfo['MediaSources']], title="Choose version").show()
-        source = self.iteminfo["MediaSources"][source_id]
+            source = choice_menu(self.iteminfo["MediaSources"], lambda s: s["Name"], title="Choose version")
+
         audio_streams = [stream for stream in source["MediaStreams"] if stream["Type"] == "Audio"]
         if len(audio_streams) > 1:
-            choice = TerminalMenu([f'[{source.get("Language", "und")}] {source["DisplayTitle"]}' for source in audio_streams], title="Choose audio").show()
-            aid = audio_streams[choice]["Index"]
+            audio_stream = choice_menu(audio_streams, lambda s: f'[{s.get("Language", "und")}] {s["DisplayTitle"]}', title="Choose audio")
+            aid = audio_stream["Index"]
         subtitle_streams = [stream for stream in source["MediaStreams"] if stream["Type"] == "Subtitle"]
         if subtitle_streams:
-            choice = TerminalMenu([f'[{source.get("Language", "und")}] {source["DisplayTitle"]}' for source in subtitle_streams], title="Pick subtitles").show()
-            sid = subtitle_streams[choice]["Index"]
+            subtitle_stream = choice_menu(subtitle_streams, lambda s: f'[{s.get("Language", "und")}] {s["DisplayTitle"]}', title="Pick subtitles")
+            sid = subtitle_stream["Index"]
 
         bitrate = input("Provide bitrate [K/M]: ")
         if not bitrate.endswith(("K", "M")):
