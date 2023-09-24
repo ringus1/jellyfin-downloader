@@ -47,6 +47,7 @@ class Downloader:
         self.m3u8_obj = None
         self.started_at = None
         self.parallel = CONNECTIONS
+        self.source_config = {}
 
         self.download_path = DOWNLOAD_DIR
         self.output_filename = None
@@ -259,6 +260,17 @@ class Downloader:
         bitrate = human_readable_to_bytes(bitrate)
 
         self.profile = self.get_profile(video_bitrate=bitrate, h265=config["client"]["prefer_h265"])
+        self.source_config = {
+            "source": source,
+            "aid": aid,
+            "sid": sid,
+        }
+
+    async def start_session(self, *, resume: bool = False):
+        source = self.source_config["source"]
+        aid = self.source_config["aid"]
+        sid = self.source_config["sid"]
+
         self.info = self.client.jellyfin.get_play_info(
             source["Id"], self.profile, aid=aid, sid=sid, start_time_ticks=0)
         self.media_source = item_by_id(self.info['MediaSources'], source["Id"])
@@ -268,9 +280,11 @@ class Downloader:
                 self.profile['MaxStreamingBitrate'], self.media_source["Bitrate"]
             ) / self.media_source["Bitrate"]
         ) / (1024 * 1024), 2)
-        proceed = input(f"Estimating transcoded file to be around {self.expected_size_mb} MB. Proceed? [Y/n] ")
-        if proceed == "n":
-            raise KeyboardInterrupt("Interrupting")
+
+        if not resume:
+            proceed = input(f"Estimating transcoded file to be around {self.expected_size_mb} MB. Proceed? [Y/n] ")
+            if proceed == "n":
+                raise KeyboardInterrupt("Interrupting")
 
         if sid is not None:
             try:

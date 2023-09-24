@@ -50,6 +50,7 @@ async def run_app():
         save_session(d)
 
     try:
+        await d.start_session(resume=resume)
         await d.download_subtitles()
         await d.download_files()
         os.remove(f"{d.output_video_file}.session")
@@ -61,4 +62,7 @@ async def run_app():
 
 
 if __name__ == "__main__":
-    asyncio.run(run_app())
+    try:
+        asyncio.run(run_app())
+    except KeyboardInterrupt:
+        pass
