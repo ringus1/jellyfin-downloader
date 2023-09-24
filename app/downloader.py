@@ -83,7 +83,7 @@ class Downloader:
         transcode_codecs = "h264,mpeg4,mpeg2video"
         if h265:
             transcode_codecs = "h265,hevc," + transcode_codecs
-        audio_transcode_codecs = "aac,mp3,ac3,opus,flac,vorbis"
+        audio_transcode_codecs = "aac,mp3,ac3,eac3,mp2,opus,flac,vorbis"
         profile = {
             "Name": "jellyfin-downloader",
             "MaxStreamingBitrate": video_bitrate,
@@ -92,6 +92,17 @@ class Downloader:
             "TimelineOffsetSeconds": 5,
             "TranscodingProfiles": [
                 {"Type": "Audio"},
+                {
+                    "Container": "mp4",
+                    "Type": "Video",
+                    "AudioCodec": "aac,mp3,ac3,eac3,mp2,opus,flac",
+                    "VideoCodec": "av1,hevc,h264",
+                    "Context": "Streaming",
+                    "Protocol": "hls",
+                    "MaxAudioChannels": "2",
+                    "MinSegments": "1",
+                    "BreakOnNonKeyFrames": True,
+                },
                 {
                     "Container": "ts",
                     "Type": "Video",
@@ -103,7 +114,13 @@ class Downloader:
                 {"Container": "jpeg", "Type": "Photo"},
             ],
             "DirectPlayProfiles": [{"Type": "Video"}, {"Type": "Audio"}, {"Type": "Photo"}],
-            "ResponseProfiles": [],
+            "ResponseProfiles": [
+                {
+                    "Type": "Video",
+                    "Container": "m4v",
+                    "MimeType": "video/mp4"
+                }
+            ],
             "ContainerProfiles": [],
             "CodecProfiles": [],
             "SubtitleProfiles": [
@@ -327,6 +344,12 @@ class Downloader:
 
     async def download_files(self):
         self.started_at = datetime.utcnow()
+
+        try:
+            init_file = self.base_url + "/" + self.m3u8_obj.segment_map[0].uri
+        except (AttributeError, IndexError):
+            init_file = None
+        init_buffer = b''
         files = [self.base_url + "/" + uri for uri in self.m3u8_obj.files]
         part_file_path = f"{self.output_video_file}.part"
 
@@ -356,12 +379,20 @@ class Downloader:
             def pbar_update(buffer: bytes):
                 pbar.update(len(buffer) / (1024 * 1024))
 
+            if init_file:
+                async with aiohttp.ClientSession(
+                    raise_for_status=True,
+                    timeout=TIMEOUT_CONFIG
+                ) as session:
+                    _, init_buffer = await self.download(init_file, session)
+
             async with aiohttp.ClientSession(
                 raise_for_status=True,
                 timeout=TIMEOUT_CONFIG
             ) as session:
                 _, bigbuffer = await self.download(files[current_idx], session)
                 current_idx += 1
+            bigbuffer = init_buffer + bigbuffer
 
             async with aiohttp.ClientSession(
                 headers={"X-Buffer-Only": "true"},
@@ -379,7 +410,7 @@ class Downloader:
 
                     buffers.sort(key=lambda i: i[0])
                     for _, _, buffer in buffers:
-                        bigbuffer += buffer
+                        bigbuffer += init_buffer + buffer
 
                     if len(bigbuffer) > DUMP_EVERY:
                         with open(part_file_path, "ab") as f:
