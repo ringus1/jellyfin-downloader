@@ -371,7 +371,9 @@ class Downloader:
                 while current_idx < all_files:
                     buffers = await asyncio.gather(
                         *[asyncio.create_task(self.download(files[idx], session, idx=idx))
-                        for idx in range(current_idx, current_idx + self.parallel)]
+                        for idx in range(
+                            current_idx,
+                            min(current_idx + self.parallel, all_files))]
                     )
                     current_idx += self.parallel
 
