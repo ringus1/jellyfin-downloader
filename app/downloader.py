@@ -336,6 +336,8 @@ class Downloader:
             if confirm == "n":
                 return 0
             return int(idx)
+        else:
+            return 0
 
     def _save_download_status(self, current_idx: int):
         with open(self.status_file, "w") as f:
@@ -444,7 +446,6 @@ class Downloader:
         self._cleanup()
 
     def report_progress(self):
-        # print("Progress update")
         self.client.jellyfin.session_progress(data=self.get_playdata(update=True))
 
     def report_stop(self):
