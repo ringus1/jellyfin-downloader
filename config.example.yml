@@ -1,0 +1,13 @@
+server:
+  url: http://localhost:8096
+
+authentication:
+  username: aaa
+  pass: bbb
+
+client:
+  connections: 10
+  buffersize: 10M
+  keep_partials: false
+  prefer_h265: true
+  download_dir: downloads
