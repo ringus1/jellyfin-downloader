@@ -54,7 +54,6 @@ class Downloader:
         self.output_filename = None
 
         self.partials_path = os.path.join(self.download_path, "partials")
-        os.makedirs(self.partials_path, exist_ok=True)
 
     @property
     def output_video_file(self):
@@ -186,6 +185,8 @@ class Downloader:
         return pd
 
     def initialize(self):
+        os.makedirs(self.partials_path, exist_ok=True)
+
         client = JellyfinClient()
         client.config.app(
             APP_NAME,
