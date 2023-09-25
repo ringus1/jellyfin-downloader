@@ -1,0 +1,3 @@
+
+class ProcessInterrupted(Exception):
+    pass

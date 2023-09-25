@@ -4,6 +4,7 @@ from tqdm import tqdm
 from urllib.parse import urlparse, urlunparse, parse_qsl
 from typing import Optional, Union
 
+import subprocess
 import m3u8
 import asyncio
 import aiohttp
@@ -330,7 +331,7 @@ class Downloader:
         except FileNotFoundError:
             return 0
         if self._validate_transcode_url(transcode_url):
-            confirm = input("There is incomplete session for this item, resume? [Y/n]")
+            confirm = input("There is incomplete session for this item, resume? [Y/n] ")
             if confirm == "n":
                 return 0
             return int(idx)
@@ -339,9 +340,17 @@ class Downloader:
         with open(self.status_file, "w") as f:
             f.write(self.transcode_url + "\n" + str(current_idx))
 
-    def _cleanup_tmps(self):
-        os.rename(f"{self.output_video_file}.part", self.output_video_file)
-        os.remove(self.status_file)
+    def _cleanup(self):
+        part_file_path = f"{self.output_video_file}.part"
+        try:
+            cmds = ["ffmpeg", "-i", part_file_path, "-c", "copy", self.output_video_file]
+            print(f'Remuxing file with: {" ".join(cmds)}')
+            subprocess.run(cmds, capture_output=True)
+            os.remove(part_file_path)
+            os.remove(self.status_file)
+            os.remove(f"{self.output_video_file}.session")
+        except Exception as e:
+            print(f"Failed to remux final file into mp4. See error:\n{e}")
 
     async def download_subtitles(self):
         if not self.subtitle_url:
@@ -377,58 +386,61 @@ class Downloader:
 
         if current_idx:
             initial_size = os.path.getsize(part_file_path) / (1024 * 1024)
+        else:
+            os.remove(part_file_path)
 
-        with tqdm(
-            total=expected_size,
-            unit="MB",
-            initial=initial_size,
-            # bar_format='{l_bar}{bar}| {n_fmt:0.2f}/{total_fmt:0.2f} [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
-        ) as pbar:
-            def pbar_update(buffer: bytes):
-                pbar.update(len(buffer) / (1024 * 1024))
+        if current_idx <= all_files:
+            with tqdm(
+                total=expected_size,
+                unit="MB",
+                initial=initial_size,
+                # bar_format='{l_bar}{bar}| {n_fmt:0.2f}/{total_fmt:0.2f} [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
+            ) as pbar:
+                def pbar_update(buffer: bytes):
+                    pbar.update(len(buffer) / (1024 * 1024))
 
-            if init_file:
+                if init_file:
+                    async with aiohttp.ClientSession(
+                        raise_for_status=True,
+                        timeout=TIMEOUT_CONFIG
+                    ) as session:
+                        _, init_buffer = await self.download(init_file, session)
+
                 async with aiohttp.ClientSession(
                     raise_for_status=True,
                     timeout=TIMEOUT_CONFIG
                 ) as session:
-                    _, init_buffer = await self.download(init_file, session)
+                    _, bigbuffer = await self.download(files[current_idx], session)
+                    current_idx += 1
+                bigbuffer = init_buffer + bigbuffer
 
-            async with aiohttp.ClientSession(
-                raise_for_status=True,
-                timeout=TIMEOUT_CONFIG
-            ) as session:
-                _, bigbuffer = await self.download(files[current_idx], session)
-                current_idx += 1
-            bigbuffer = init_buffer + bigbuffer
+                async with aiohttp.ClientSession(
+                    headers={"X-Buffer-Only": "true"},
+                    timeout=TIMEOUT_CONFIG,
+                    raise_for_status=True
+                ) as session:
+                    while current_idx < all_files:
+                        buffers = await asyncio.gather(
+                            *[asyncio.create_task(self.download(files[idx], session, idx=idx))
+                            for idx in range(
+                                current_idx,
+                                min(current_idx + self.parallel, all_files))]
+                        )
+                        current_idx += self.parallel
 
-            async with aiohttp.ClientSession(
-                headers={"X-Buffer-Only": "true"},
-                timeout=TIMEOUT_CONFIG,
-                raise_for_status=True
-            ) as session:
-                while current_idx < all_files:
-                    buffers = await asyncio.gather(
-                        *[asyncio.create_task(self.download(files[idx], session, idx=idx))
-                        for idx in range(
-                            current_idx,
-                            min(current_idx + self.parallel, all_files))]
-                    )
-                    current_idx += self.parallel
+                        buffers.sort(key=lambda i: i[0])
+                        for _, _, buffer in buffers:
+                            bigbuffer += init_buffer + buffer
 
-                    buffers.sort(key=lambda i: i[0])
-                    for _, _, buffer in buffers:
-                        bigbuffer += init_buffer + buffer
+                        if len(bigbuffer) > DUMP_EVERY:
+                            with open(part_file_path, "ab") as f:
+                                f.write(bigbuffer)
+                            self._save_download_status(current_idx)
+                            pbar_update(bigbuffer)
+                            bigbuffer = b''
 
-                    if len(bigbuffer) > DUMP_EVERY:
-                        with open(part_file_path, "ab") as f:
-                            f.write(bigbuffer)
-                        self._save_download_status(current_idx)
-                        pbar_update(bigbuffer)
-                        bigbuffer = b''
-
-                    self.report_progress()
-        self._cleanup_tmps()
+                        self.report_progress()
+        self._cleanup()
 
     def report_progress(self):
         # print("Progress update")

@@ -8,6 +8,7 @@ import glob
 from app.settings import config
 from app.downloader import Downloader
 from app.utils import choice_menu
+from app.exceptions import ProcessInterrupted
 
 DOWNLOAD_DIR = config["client"]["download_dir"]
 
@@ -53,8 +54,7 @@ async def run_app():
         await d.start_session(resume=resume)
         await d.download_subtitles()
         await d.download_files()
-        os.remove(f"{d.output_video_file}.session")
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ProcessInterrupted):
         print("Interrupted, closing...")
     finally:
         d.report_stop()
