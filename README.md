@@ -51,11 +51,9 @@ Before using JellyfinDownloader, ensure that you have the following prerequisite
    poetry run python jellyfin_downloader.py
    ```
 
-3. The script will prompt you to enter the Jellyfin server URL, your credentials (if required), and allow you to browse and select media titles from your Jellyfin library.
+3. Select the titles you want to download from the interactive menu.
 
-4. Select the titles you want to download from the interactive menu.
-
-5. The script will start downloading the selected titles using multiple connections for faster downloads.
+4. The script will start downloading the selected titles using multiple connections for faster downloads.
 
 ## Resuming Downloads
 
