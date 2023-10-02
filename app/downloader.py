@@ -1,4 +1,5 @@
 from jellyfin_apiclient_python import JellyfinClient
+from contextlib import suppress
 from datetime import datetime
 from tqdm import tqdm
 from urllib.parse import urlparse, urlunparse, parse_qsl
@@ -390,7 +391,8 @@ class Downloader:
         if current_idx:
             initial_size = os.path.getsize(part_file_path) / (1024 * 1024)
         else:
-            os.remove(part_file_path)
+            with suppress(FileNotFoundError):
+                os.remove(part_file_path)
 
         if current_idx <= all_files:
             with tqdm(
