@@ -222,6 +222,11 @@ class Downloader:
             production_year = item.get("ProductionYear", "Unknown")
             return f'{item["Name"]} [{production_year}]'
 
+        def _episode_name(episode):
+            season = str(episode["ParentIndexNumber"]).zfill(2)
+            episode_nr = str(episode["IndexNumber"]).zfill(2)
+            return f'S{season}E{episode_nr} {episode["Name"]}'
+
         self.item = choice_menu(items, _get_item_name)
         self.iteminfo = self.client.jellyfin.get_item(self.item["Id"])
 
@@ -233,11 +238,11 @@ class Downloader:
             season = choice_menu(seasons["Items"], lambda s: s["Name"], title="Choose season")
 
             episodes = self.client.jellyfin.get_season(self.iteminfo["Id"], season["Id"])
-            episode = choice_menu(episodes["Items"], lambda s: s["Name"], title="Choose episode")
+            episode = choice_menu(episodes["Items"], _episode_name, title="Choose episode")
             self.iteminfo = self.client.jellyfin.get_item(episode["Id"])
 
             self.download_path = os.path.join(self.download_path, _get_item_name(self.item), season["Name"])
-            self.output_filename = episode["Name"]
+            self.output_filename = _episode_name(episode)
             self.info = episode
 
         os.makedirs(self.download_path, exist_ok=True)
