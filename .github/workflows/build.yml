@@ -22,7 +22,7 @@ jobs:
           - os: windows-latest
             artifact_name: jellyfin-downloader-windows-x64.exe
             binary_name: jellyfin-downloader.exe
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             artifact_name: jellyfin-downloader-linux-x64
             binary_name: jellyfin-downloader
 
