@@ -939,9 +939,12 @@ class Downloader:
             with suppress(FileNotFoundError):
                 os.remove(part_file_path)
 
+        if expected_size and initial_size > expected_size:
+            expected_size = initial_size
+
         if current_idx <= all_files:
             bar_fmt = (
-                "{percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f} MB [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
+                "{percentage:3.0f}%|{bar}| {n:.2f}/{total_fmt} MB [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
                 if expected_size > 0
                 else "{n:.2f} MB [{elapsed}, {rate_fmt}{postfix}]"
             )
@@ -953,7 +956,10 @@ class Downloader:
             ) as pbar:
 
                 def pbar_update(buffer: bytes):
-                    pbar.update(len(buffer) / (1024 * 1024))
+                    delta = len(buffer) / (1024 * 1024)
+                    if pbar.total is not None and (pbar.n + delta > pbar.total):
+                        pbar.total = round(pbar.n + delta, 2)
+                    pbar.update(delta)
 
                 if init_file:
                     async with aiohttp.ClientSession(
@@ -996,6 +1002,13 @@ class Downloader:
                             bigbuffer = b""
 
                         self.report_progress()
+
+                    if bigbuffer:
+                        with open(part_file_path, "ab") as f:
+                            f.write(bigbuffer)
+                        self.save_resume_state(current_idx)
+                        pbar_update(bigbuffer)
+                        bigbuffer = b""
 
         self.remux_and_cleanup_download()
 
