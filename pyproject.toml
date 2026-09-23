@@ -15,8 +15,51 @@ backoff = "^2.2.1"
 pyyaml = "^6.0.3"
 tqdm = "^4.70.1"
 inquirer = "^3.4.1"
+pathvalidate = "^3.3.1"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)",
+    "pytest-mock (>=3.15.1,<4.0.0)",
+    "ruff (>=0.16.8,<0.17.0)"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [
+    "build",
+    "dist",
+    ".git",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade (modern Python 3.12 syntax)
+    "B",   # flake8-bugbear
+]
+ignore = [
+    "E501", # line length
+    "UP047", # generic function syntax [T] (keep TypeVar for maximum compatibility)
+]
+
+[tool.ruff.lint.isort]
+no-sections = true
+lines-between-types = 1
+combine-as-imports = true
+
+

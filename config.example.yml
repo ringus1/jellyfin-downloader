@@ -11,3 +11,4 @@ client:
   keep_partials: false
   prefer_h265: true
   download_dir: downloads
+  ffmpeg_path: ffmpeg

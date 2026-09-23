@@ -8,3 +8,5 @@ config.yml
 .DS_Store
 __pycache__
 downloads/
+dist/
+build/
