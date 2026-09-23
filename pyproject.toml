@@ -4,7 +4,7 @@ version = "0.0.0"
 description = ""
 authors = ["ringus1 <ringus1@dm.me>"]
 readme = "README.md"
-packages = [{include = "jellyfin_downloader"}]
+packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
