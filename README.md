@@ -59,13 +59,44 @@ Before using JellyfinDownloader, ensure that you have the following prerequisite
 
 If a download session is interrupted, you can resume it by re-running the script. The script will detect the existing download session and offer to resume it.
 
+## Building Standalone Executable (Single Binary)
+
+You can package the application into a standalone executable (`.exe` on Windows or ELF binary on Linux) that can run on other machines without needing Python or Poetry.
+
+### Option 1: Automatic Builds via GitHub Actions
+A GitHub Actions workflow is included in `.github/workflows/build.yml`.
+- Pushing a release tag (e.g. `v0.1.0`) automatically compiles and releases standalone binaries for **Windows** (`jellyfin-downloader-windows-x64.exe`) and **Linux** (`jellyfin-downloader-linux-x64`) with FFmpeg pre-bundled!
+- You can also trigger the build manually anytime in the GitHub Actions tab.
+
+### Option 2: Local Build with PyInstaller
+Run the local build script:
+```shell
+poetry run python build_executable.py
+```
+The resulting executable will be placed in the `dist/` directory. Place your `config.yml` in the same directory as the executable (or in the working directory) and run it directly.
+
 ## Disclaimer
 
 JellyfinDownloader is provided as-is and without any warranty. Use it responsibly and ensure that you have the legal rights to download the media files you select.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). Feel free to modify and distribute it as needed, but please provide attribution to the original project.
+## Development & Code Quality
+
+To maintain clean code formatting and organized imports:
+
+- **Run tests:**
+  ```shell
+  poetry run pytest
+  ```
+- **Lint and sort imports:**
+  ```shell
+  poetry run ruff check --fix .
+  ```
+- **Format code:**
+  ```shell
+  poetry run ruff format .
+  ```
 
 ## Contributing
 

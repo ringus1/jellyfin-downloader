@@ -1,63 +1,125 @@
-#!python
-
 import asyncio
-import pickle
-import os
 import glob
+import os
+import pickle
+import shutil
+import sys
 
-from app.settings import config
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from app.downloader import Downloader
-from app.utils import choice_menu
 from app.exceptions import ProcessInterrupted
+from app.settings import config
+from app.utils import ACTION_BACK, prompt_choice_menu, resolve_ffmpeg_path
+from app.version import __version__
 
 DOWNLOAD_DIR = config["client"]["download_dir"]
 
 
-def save_session(downloader: "Downloader"):
+def verify_prerequisites() -> bool:
+    """Verify that external dependencies (FFmpeg) are available before executing downloads."""
+    ffmpeg_cmd = config.get("client", {}).get("ffmpeg_path", "ffmpeg")
+    resolved_ffmpeg = resolve_ffmpeg_path(ffmpeg_cmd)
+
+    if not shutil.which(resolved_ffmpeg) and not os.path.exists(resolved_ffmpeg):
+        print(f"Error: FFmpeg was not found on your system (checked: '{ffmpeg_cmd}').")
+        print("FFmpeg is required to merge and remux downloaded HLS streams into an MP4 file.")
+        print("\nHow to install FFmpeg:")
+        print("  Windows:")
+        print("    Option 1: winget install Gyan.FFmpeg")
+        print("    Option 2: Place ffmpeg.exe in the same folder as this application")
+        print("    Option 3: Specify 'ffmpeg_path' in config.yml (under client:)")
+        print("  Linux:")
+        print("    sudo apt-get install ffmpeg (or distribution package manager)")
+        return False
+
+    return True
+
+
+def save_session_state(downloader: "Downloader"):
+    """Persist downloader state to a .session file for resuming interrupted downloads."""
     client = downloader.client
     downloader.client = None
-    with open(f"{downloader.output_video_file}.session", 'wb') as file:
-        pickle.dump(downloader, file)
+    session_file_path = f"{downloader.output_video_file}.session"
+
+    with open(session_file_path, "wb") as file_stream:
+        pickle.dump(downloader, file_stream)
+
     downloader.client = client
 
 
+def find_saved_sessions(download_directory: str) -> list[str]:
+    """Search for existing .session files in the download directory."""
+    return glob.glob(f"{download_directory}/**/*.session", recursive=True)
+
+
+def load_saved_session(session_path: str) -> Downloader | None:
+    """Load and unpickle a saved downloader session."""
+    try:
+        with open(session_path, "rb") as file_stream:
+            downloader: Downloader = pickle.load(file_stream)
+            return downloader
+    except (pickle.UnpicklingError, OSError, EOFError, AttributeError) as exc:
+        print(f"Failed to open selected session '{session_path}': {exc}")
+        return None
+
+
 async def run_app():
-    old_sessions = glob.glob(f"{DOWNLOAD_DIR}/**/*.session", recursive=True)
+    """Main application lifecycle orchestrating session resumption, selection, and downloading."""
+    print(f"=== JellyfinDownloader v{__version__} ===\n")
+    if not verify_prerequisites():
+        return
 
-    d = None
+    saved_sessions = find_saved_sessions(DOWNLOAD_DIR)
+    active_downloader: Downloader | None = None
     resume = False
-    if old_sessions:
-        resume = input("Detected previous run(s), resume? [Y/n] ") != "n"
-        if resume:
-            session = choice_menu(old_sessions)
-            try:
-                with open(session, "rb") as f:
-                    d = pickle.load(f)
-            except Exception as e:
-                print(f"Failed to open selected session: {e}")
+
+    if saved_sessions:
+        resume_prompt = input("Detected previous run(s), resume? [Y/n] ").strip().lower()
+        if resume_prompt != "n":
+            selected_session = prompt_choice_menu(
+                saved_sessions,
+                title="Choose session to resume",
+                extra_options=[("[Start new download]", ACTION_BACK)],
+                allow_back=False,
+            )
+
+            if selected_session == ACTION_BACK:
+                resume = False
+            elif selected_session is None:
+                print("Cancelled, closing...")
                 return
+            else:
+                active_downloader = load_saved_session(selected_session)
+                if active_downloader is None:
+                    return
+                resume = True
 
-    if d is None:
-        d = Downloader()
+    if active_downloader is None:
+        active_downloader = Downloader()
 
-    d.initialize()
+    active_downloader.initialize()
 
     if not resume:
         try:
-            await d.choose_item()
-        except (KeyboardInterrupt, ):
-            print("Interrupted, closing...")
+            await active_downloader.choose_item()
+        except (KeyboardInterrupt, ProcessInterrupted):
+            print("Cancelled, closing...")
             return
-        save_session(d)
+
+        save_session_state(active_downloader)
 
     try:
-        await d.start_session(resume=resume)
-        await d.download_subtitles()
-        await d.download_files()
+        await active_downloader.start_session(resume=resume)
+        await active_downloader.download_subtitles()
+        await active_downloader.download_files(resume=resume)
     except (KeyboardInterrupt, ProcessInterrupted):
         print("Interrupted, closing...")
     finally:
-        d.report_stop()
+        active_downloader.report_stop()
         print("Finished")
 
 
