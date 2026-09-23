@@ -15,9 +15,9 @@ from .utils import (
     ACTION_EXIT,
     ACTION_NONE,
     ACTION_SEARCH_AGAIN,
-    choice_menu,
     human_readable_to_bytes,
     item_by_id,
+    prompt_choice_menu,
     resolve_ffmpeg_path,
     sanitize_path_component,
 )
@@ -53,19 +53,6 @@ class DownloadWizardStep(StrEnum):
     SUBTITLES = "subtitles"
     BITRATE = "bitrate"
     CONFIRM = "confirm"
-
-
-# Backward compatibility aliases for step names
-STEP_CATEGORY = DownloadWizardStep.CATEGORY
-STEP_SEARCH = DownloadWizardStep.SEARCH
-STEP_ITEM = DownloadWizardStep.ITEM
-STEP_SEASON = DownloadWizardStep.SEASON
-STEP_EPISODE = DownloadWizardStep.EPISODE
-STEP_SOURCE = DownloadWizardStep.SOURCE
-STEP_AUDIO = DownloadWizardStep.AUDIO
-STEP_SUBTITLES = DownloadWizardStep.SUBTITLES
-STEP_BITRATE = DownloadWizardStep.BITRATE
-STEP_CONFIRM = DownloadWizardStep.CONFIRM
 
 
 def extract_item_display_name(item: dict) -> str:
@@ -304,7 +291,7 @@ class Downloader:
     def prompt_category_step(self) -> str:
         """Prompt user for media category (Movies or Series)."""
         categories = ["Movies", "Series"]
-        category_choice = choice_menu(
+        category_choice = prompt_choice_menu(
             categories,
             title="Choose category",
             extra_options=[("[Exit]", ACTION_EXIT)],
@@ -342,7 +329,7 @@ class Downloader:
 
     def prompt_item_step(self, items: list[dict], category: str) -> tuple[str | None, dict | None]:
         """Prompt user to select a movie or series item from search results."""
-        item_choice = choice_menu(
+        item_choice = prompt_choice_menu(
             items,
             name=extract_item_display_name,
             title=f"Choose {category.lower()[:-1]}",
@@ -368,7 +355,7 @@ class Downloader:
             print("No seasons found for this series.")
             return ACTION_BACK, None
 
-        season_choice = choice_menu(
+        season_choice = prompt_choice_menu(
             seasons,
             name=lambda s: s.get("Name", "Unknown season"),
             title="Choose season",
@@ -394,7 +381,7 @@ class Downloader:
             print("No episodes found in this season.")
             return ACTION_BACK, None, None
 
-        episode_choice = choice_menu(
+        episode_choice = prompt_choice_menu(
             episodes,
             name=build_episode_filename,
             title="Choose episode",
@@ -412,7 +399,7 @@ class Downloader:
 
     def prompt_source_step(self, media_sources: list[dict]) -> tuple[str | None, dict | None]:
         """Prompt user to choose between multiple media source releases."""
-        source_choice = choice_menu(
+        source_choice = prompt_choice_menu(
             media_sources,
             name=lambda s: s.get("Name", "Default"),
             title="Choose version",
@@ -429,7 +416,7 @@ class Downloader:
 
     def prompt_audio_step(self, audio_streams: list[dict]) -> tuple[str | None, int | None]:
         """Prompt user to choose an audio track."""
-        audio_choice = choice_menu(
+        audio_choice = prompt_choice_menu(
             audio_streams,
             name=lambda s: f"[{s.get('Language', 'und')}] {s.get('DisplayTitle', 'Audio')}",
             title="Choose audio",
@@ -446,7 +433,7 @@ class Downloader:
 
     def prompt_subtitle_step(self, subtitle_streams: list[dict]) -> tuple[str | None, int | None]:
         """Prompt user to choose a subtitle track or skip subtitles."""
-        subtitle_choice = choice_menu(
+        subtitle_choice = prompt_choice_menu(
             subtitle_streams,
             name=lambda s: f"[{s.get('Language', 'und')}] {s.get('DisplayTitle', 'Subtitle')}",
             title="Pick subtitles",
@@ -840,8 +827,6 @@ class Downloader:
         except Exception:
             return False
 
-    _validate_transcode_url = validate_transcode_url
-
     def load_resume_state(self, *, resume: bool = False) -> int:
         """Attempt to load last downloaded chunk index from status file."""
         try:
@@ -874,14 +859,10 @@ class Downloader:
         )
         return 0
 
-    _resume_download = load_resume_state
-
     def save_resume_state(self, current_idx: int):
         """Save current transcode URL and chunk index to status file."""
         with open(self.status_file, "w", encoding="utf-8") as file_stream:
             file_stream.write(f"{self.transcode_url}\n{current_idx}")
-
-    _save_download_status = save_resume_state
 
     def remux_and_cleanup_download(self):
         """Remux downloaded HLS streams into an MP4 container and clean up temporary files."""
@@ -908,8 +889,6 @@ class Downloader:
                 os.remove(f"{self.output_video_file}.session")
         except (subprocess.SubprocessError, OSError) as exc:
             print(f"Failed to remux final file into mp4. See error:\n{exc}")
-
-    _cleanup = remux_and_cleanup_download
 
     async def download_subtitles(self):
         """Download subtitle file if available and persist it using UTF-8."""
@@ -1070,8 +1049,6 @@ class Downloader:
         else:
             with open(filepath, "wb") as f:
                 f.write(data)
-
-    _save = save_file_content
 
     @backoff.on_exception(
         backoff.expo,

@@ -124,7 +124,5 @@ def build_standalone_executable():
         sys.exit(build_result.returncode)
 
 
-main = build_standalone_executable
-
 if __name__ == "__main__":
     build_standalone_executable()

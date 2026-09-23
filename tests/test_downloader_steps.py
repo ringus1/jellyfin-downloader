@@ -1,52 +1,53 @@
 from app import downloader
+from app.downloader import DownloadWizardStep
 
 
 class TestWizardStepNavigation:
     """Verifies that navigation transitions allow bidirectional flow through wizard steps."""
 
     def test_transitions_back_from_confirm_to_bitrate(self):
-        prev = downloader.determine_previous_step(downloader.STEP_CONFIRM)
+        prev = downloader.determine_previous_step(DownloadWizardStep.CONFIRM)
 
-        assert prev == downloader.STEP_BITRATE
+        assert prev == DownloadWizardStep.BITRATE
 
     def test_transitions_back_to_subtitles_when_subtitles_exist(self):
         prev = downloader.determine_previous_step(
-            downloader.STEP_BITRATE,
+            DownloadWizardStep.BITRATE,
             subtitle_streams=[{"Index": 3}],
         )
 
-        assert prev == downloader.STEP_SUBTITLES
+        assert prev == DownloadWizardStep.SUBTITLES
 
     def test_transitions_back_to_audio_when_multiple_audio_tracks_exist_and_no_subtitles(self):
         prev = downloader.determine_previous_step(
-            downloader.STEP_BITRATE,
+            DownloadWizardStep.BITRATE,
             subtitle_streams=[],
             audio_streams=[{"Index": 1}, {"Index": 2}],
         )
 
-        assert prev == downloader.STEP_AUDIO
+        assert prev == DownloadWizardStep.AUDIO
 
     def test_transitions_back_to_episode_for_series(self):
         prev = downloader.determine_previous_step(
-            downloader.STEP_BITRATE,
+            DownloadWizardStep.BITRATE,
             category="Series",
             subtitle_streams=[],
             audio_streams=[{"Index": 1}],
             media_sources=[{"Id": "src1"}],
         )
 
-        assert prev == downloader.STEP_EPISODE
+        assert prev == DownloadWizardStep.EPISODE
 
     def test_transitions_back_to_item_for_movies(self):
         prev = downloader.determine_previous_step(
-            downloader.STEP_BITRATE,
+            DownloadWizardStep.BITRATE,
             category="Movies",
             subtitle_streams=[],
             audio_streams=[{"Index": 1}],
             media_sources=[{"Id": "src1"}],
         )
 
-        assert prev == downloader.STEP_ITEM
+        assert prev == DownloadWizardStep.ITEM
 
     def test_determines_next_step_after_source_selection(self):
         # Multiple audio streams -> audio step
@@ -55,7 +56,7 @@ class TestWizardStepNavigation:
                 audio_streams=[{"Index": 1}, {"Index": 2}],
                 subtitle_streams=[],
             )
-            == downloader.STEP_AUDIO
+            == DownloadWizardStep.AUDIO
         )
 
         # Single audio, has subtitles -> subtitles step
@@ -64,7 +65,7 @@ class TestWizardStepNavigation:
                 audio_streams=[{"Index": 1}],
                 subtitle_streams=[{"Index": 3}],
             )
-            == downloader.STEP_SUBTITLES
+            == DownloadWizardStep.SUBTITLES
         )
 
         # Single audio, no subtitles -> bitrate step
@@ -73,7 +74,7 @@ class TestWizardStepNavigation:
                 audio_streams=[{"Index": 1}],
                 subtitle_streams=[],
             )
-            == downloader.STEP_BITRATE
+            == DownloadWizardStep.BITRATE
         )
 
 

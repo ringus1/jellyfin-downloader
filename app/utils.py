@@ -37,9 +37,6 @@ def resolve_ffmpeg_path(configured_cmd: str = "ffmpeg") -> str:
     return configured_cmd
 
 
-get_ffmpeg_path = resolve_ffmpeg_path
-
-
 def sanitize_path_component(name: str) -> str:
     """Sanitize a file or directory name component across platforms.
 
@@ -51,9 +48,6 @@ def sanitize_path_component(name: str) -> str:
 
     normalized_name = re.sub(r"\s*[:/\\]\s*", " - ", str(name))
     return sanitize_filename(normalized_name, replacement_text="")
-
-
-sanitize_name = sanitize_path_component
 
 
 def build_choice_labels_and_mapping(
@@ -162,9 +156,6 @@ def prompt_choice_menu(
         return choice_mapping.get(answers["choice"])
 
     return None
-
-
-choice_menu = prompt_choice_menu
 
 
 def human_readable_to_bytes(size: str) -> int:

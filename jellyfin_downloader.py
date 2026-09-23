@@ -13,7 +13,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from app.downloader import Downloader
 from app.exceptions import ProcessInterrupted
 from app.settings import config
-from app.utils import ACTION_BACK, choice_menu, resolve_ffmpeg_path
+from app.utils import ACTION_BACK, prompt_choice_menu, resolve_ffmpeg_path
 from app.version import __version__
 
 DOWNLOAD_DIR = config["client"]["download_dir"]
@@ -39,9 +39,6 @@ def verify_prerequisites() -> bool:
     return True
 
 
-check_prerequisites = verify_prerequisites
-
-
 def save_session_state(downloader: "Downloader"):
     """Persist downloader state to a .session file for resuming interrupted downloads."""
     client = downloader.client
@@ -52,9 +49,6 @@ def save_session_state(downloader: "Downloader"):
         pickle.dump(downloader, file_stream)
 
     downloader.client = client
-
-
-save_session = save_session_state
 
 
 def find_saved_sessions(download_directory: str) -> list[str]:
@@ -86,7 +80,7 @@ async def run_app():
     if saved_sessions:
         resume_prompt = input("Detected previous run(s), resume? [Y/n] ").strip().lower()
         if resume_prompt != "n":
-            selected_session = choice_menu(
+            selected_session = prompt_choice_menu(
                 saved_sessions,
                 title="Choose session to resume",
                 extra_options=[("[Start new download]", ACTION_BACK)],
