@@ -21,6 +21,7 @@ from .utils import (
     resolve_ffmpeg_path,
     sanitize_path_component,
 )
+from .version import __version__
 from contextlib import suppress
 from datetime import datetime
 from enum import StrEnum
@@ -285,7 +286,7 @@ class Downloader:
         client = JellyfinClient()
         client.config.app(
             APP_NAME,
-            "0.0.1",
+            __version__,
             socket.gethostname(),
             hashlib.md5(str(uuid.getnode()).encode()).hexdigest(),
         )

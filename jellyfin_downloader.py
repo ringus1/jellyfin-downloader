@@ -14,6 +14,7 @@ from app.downloader import Downloader
 from app.exceptions import ProcessInterrupted
 from app.settings import config
 from app.utils import ACTION_BACK, choice_menu, resolve_ffmpeg_path
+from app.version import __version__
 
 DOWNLOAD_DIR = config["client"]["download_dir"]
 
@@ -74,6 +75,7 @@ def load_saved_session(session_path: str) -> Downloader | None:
 
 async def run_app():
     """Main application lifecycle orchestrating session resumption, selection, and downloading."""
+    print(f"=== JellyfinDownloader v{__version__} ===\n")
     if not verify_prerequisites():
         return
 

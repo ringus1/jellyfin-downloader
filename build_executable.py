@@ -5,9 +5,63 @@ Usage:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+
+
+def resolve_build_version() -> str:
+    """Determine the release version for this build from env or git tag."""
+    # 1. Custom explicit env var
+    explicit = os.environ.get("JELLYFIN_DOWNLOADER_VERSION", "").strip()
+    if explicit:
+        return re.sub(r"^v\.?", "", explicit)
+
+    # 2. GitHub Actions ref name (e.g. 'v1.2.3' from tag push)
+    github_ref = os.environ.get("GITHUB_REF_NAME", "").strip()
+    if github_ref and (github_ref.startswith("v") or re.match(r"^\d+\.\d+", github_ref)):
+        return re.sub(r"^v\.?", "", github_ref)
+
+    # 3. Local git tag
+    try:
+        res = subprocess.run(
+            ["git", "describe", "--tags"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return re.sub(r"^v\.?", "", res.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # 4. Fallback to app/version.py or pyproject.toml
+    version_file = os.path.join(os.path.dirname(__file__), "app", "version.py")
+    if os.path.exists(version_file):
+        with open(version_file, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("__version__ = "):
+                    match = re.search(r'"([^"]+)"', line)
+                    if match:
+                        return match.group(1)
+    return "0.0.0"
+
+
+def update_version_file(version: str) -> None:
+    """Write the target version into app/version.py so PyInstaller freezes it."""
+    version_file = os.path.join(os.path.dirname(__file__), "app", "version.py")
+    if not os.path.exists(version_file):
+        return
+
+    with open(version_file, encoding="utf-8") as f:
+        content = f.read()
+
+    updated = re.sub(r'__version__ = "[^"]+"', f'__version__ = "{version}"', content, count=1)
+    with open(version_file, "w", encoding="utf-8") as f:
+        f.write(updated)
+    print(f"Set application version in app/version.py to: {version}")
 
 
 def ensure_pyinstaller_available():
@@ -41,6 +95,9 @@ def build_standalone_executable():
     """Compile JellyfinDownloader into a standalone single-file binary using PyInstaller."""
     print("=== JellyfinDownloader Build Script ===")
 
+    target_version = resolve_build_version()
+    update_version_file(target_version)
+
     ensure_pyinstaller_available()
     stage_ffmpeg_binary_if_available()
 
@@ -49,7 +106,7 @@ def build_standalone_executable():
         print(f"Error: Spec file '{spec_file}' not found.")
         sys.exit(1)
 
-    print("\nRunning PyInstaller build...")
+    print(f"\nRunning PyInstaller build for version {target_version}...")
     build_command = [sys.executable, "-m", "PyInstaller", spec_file, "--noconfirm"]
     build_result = subprocess.run(build_command)
 
@@ -58,7 +115,9 @@ def build_standalone_executable():
         output_binary_path = os.path.join("dist", f"jellyfin-downloader{exe_ext}")
         print("\n==========================================")
         print("BUILD SUCCEEDED!")
-        print(f"Standalone executable created at: {os.path.abspath(output_binary_path)}")
+        print(
+            f"Standalone executable created at: {os.path.abspath(output_binary_path)} (v{target_version})"
+        )
         print("==========================================")
     else:
         print(f"\nBuild failed with exit code {build_result.returncode}.")

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jellyfin-downloader"
-version = "0.1.0"
+version = "0.0.0"
 description = ""
 authors = ["ringus1 <ringus1@dm.me>"]
 readme = "README.md"

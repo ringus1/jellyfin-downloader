@@ -1,7 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import re
 import sys
+
+# Sync app/version.py if building in CI with GITHUB_REF_NAME or JELLYFIN_DOWNLOADER_VERSION
+env_ref = os.environ.get("GITHUB_REF_NAME", "").strip() or os.environ.get("JELLYFIN_DOWNLOADER_VERSION", "").strip()
+if env_ref and (env_ref.startswith("v") or re.match(r"^\d+\.\d+", env_ref)):
+    clean_version = re.sub(r"^v\.?", "", env_ref)
+    v_path = os.path.join("app", "version.py")
+    if os.path.exists(v_path):
+        with open(v_path, "r", encoding="utf-8") as vf:
+            v_content = vf.read()
+        v_updated = re.sub(r'__version__ = "[^"]+"', f'__version__ = "{clean_version}"', v_content, count=1)
+        with open(v_path, "w", encoding="utf-8") as vf:
+            vf.write(v_updated)
 
 block_cipher = None
 
