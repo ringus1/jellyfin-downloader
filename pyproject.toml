@@ -7,14 +7,14 @@ readme = "README.md"
 packages = [{include = "jellyfin_downloader"}]
 
 [tool.poetry.dependencies]
-python = "^3.9"
-jellyfin-apiclient-python = "^1.9.2"
-m3u8 = "^3.6.0"
-aiohttp = "^3.8.5"
+python = "^3.12"
+jellyfin-apiclient-python = "^1.18.0"
+m3u8 = "^6.0.0"
+aiohttp = "^3.14.3"
 backoff = "^2.2.1"
-pyyaml = "^6.0.1"
-tqdm = "^4.66.1"
-inquirer = "^3.1.3"
+pyyaml = "^6.0.3"
+tqdm = "^4.70.1"
+inquirer = "^3.4.1"
 
 
 [build-system]
