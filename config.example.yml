@@ -6,7 +6,7 @@ authentication:
   pass: bbb
 
 client:
-  connections: 10
+  connections: 1
   buffersize: 10M
   keep_partials: false
   prefer_h265: true

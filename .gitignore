@@ -10,3 +10,5 @@ __pycache__
 downloads/
 dist/
 build/
+ffmpeg
+ffmpeg.exe
