@@ -33,7 +33,7 @@ APP_NAME = "JellyfinDownloader"
 USER = config["authentication"]["username"]
 PASS = config["authentication"]["pass"]
 SERVER_HOST = config["server"]["url"]
-CONNECTIONS = config["client"]["connections"]
+CONNECTIONS = config["client"].get("connections", 1)
 DUMP_EVERY = config["client"]["buffersize"]
 TIMEOUT_CONFIG = aiohttp.client.ClientTimeout(total=180, connect=30, sock_connect=30, sock_read=180)
 KEEP_PARTIALS = config["client"]["keep_partials"]
