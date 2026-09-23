@@ -27,7 +27,7 @@ from datetime import datetime
 from enum import StrEnum
 from jellyfin_apiclient_python import JellyfinClient
 from tqdm import tqdm
-from urllib.parse import parse_qsl, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlparse
 
 APP_NAME = "JellyfinDownloader"
 USER = config["authentication"]["username"]
@@ -807,57 +807,71 @@ class Downloader:
 
     def validate_transcode_url(self, url: str) -> bool:
         """Validate if a stored resume URL matches current transcode parameters."""
-        ignored_params = ("DeviceId", "PlaySessionId", "api_key")
+        ignored_params = {
+            "deviceid",
+            "playsessionid",
+            "api_key",
+            "apikey",
+            "tag",
+            "livestreamid",
+            "transcodereasons",
+        }
 
-        def filter_query_parameters(query_params: str) -> str:
-            return "&".join(
-                [f"{k}={v}" for k, v in parse_qsl(query_params) if k not in ignored_params]
-            )
+        def extract_critical_params(query_str: str) -> dict[str, str]:
+            return {
+                k.lower(): v
+                for k, v in parse_qsl(query_str, keep_blank_values=True)
+                if k.lower() not in ignored_params
+            }
 
-        def rebuild_url(parsed, filtered_query: str) -> str:
-            return urlunparse(
-                [
-                    parsed.scheme,
-                    parsed.netloc,
-                    parsed.path,
-                    parsed.params,
-                    filtered_query,
-                    parsed.fragment,
-                ]
-            )
+        try:
+            if not self.transcode_url:
+                return False
+            current_parsed = urlparse(self.transcode_url)
+            target_parsed = urlparse(url)
 
-        current_parsed = urlparse(self.transcode_url)
-        target_parsed = urlparse(url)
+            if current_parsed.path != target_parsed.path:
+                return False
 
-        current_rebuilt = rebuild_url(current_parsed, filter_query_parameters(current_parsed.query))
-        target_rebuilt = rebuild_url(target_parsed, filter_query_parameters(target_parsed.query))
+            params_current = extract_critical_params(current_parsed.query)
+            params_target = extract_critical_params(target_parsed.query)
 
-        return current_rebuilt == target_rebuilt
+            return params_current == params_target
+        except Exception:
+            return False
 
     _validate_transcode_url = validate_transcode_url
 
-    def load_resume_state(self) -> int:
+    def load_resume_state(self, *, resume: bool = False) -> int:
         """Attempt to load last downloaded chunk index from status file."""
         try:
             with open(self.status_file, encoding="utf-8") as file_stream:
-                transcode_url, index_line = file_stream.readlines()
-        except (FileNotFoundError, ValueError):
+                lines = [line.strip() for line in file_stream if line.strip()]
+            if len(lines) < 2:
+                return 0
+            transcode_url, index_line = lines[0], lines[1]
+        except (FileNotFoundError, OSError):
             return 0
 
-        if self.validate_transcode_url(transcode_url.strip()):
-            confirm = (
-                input("There is an incomplete session for this item, resume? [Y/n] ")
-                .strip()
-                .lower()
-            )
-            if confirm == "n":
-                return 0
+        if self.validate_transcode_url(transcode_url):
+            if not resume:
+                confirm = (
+                    input("There is an incomplete session for this item, resume? [Y/n] ")
+                    .strip()
+                    .lower()
+                )
+                if confirm == "n":
+                    return 0
 
             try:
-                return int(index_line.strip())
+                idx = int(index_line)
+                return max(0, idx)
             except ValueError:
                 return 0
 
+        print(
+            "Notice: Stored transcode parameters do not match current session. Starting fresh download."
+        )
         return 0
 
     _resume_download = load_resume_state
@@ -906,7 +920,7 @@ class Downloader:
         subtitle_content = await response.text()
         self.save_file_content(None, subtitle_content, filepath=self.output_subtitle_file)
 
-    async def download_files(self):
+    async def download_files(self, *, resume: bool = False):
         """Execute parallel chunk download and assemble output file."""
         self.started_at = datetime.utcnow()
 
@@ -927,22 +941,36 @@ class Downloader:
 
         self.client.jellyfin.session_playing(data=self.get_playdata(nowplaying=True))
 
-        current_idx = self.load_resume_state()
-        self.save_resume_state(current_idx)
+        current_idx = self.load_resume_state(resume=resume)
         all_files = len(files)
         expected_size = self.expected_size_mb
         initial_size = 0
 
         if current_idx:
-            initial_size = round(os.path.getsize(part_file_path) / (1024 * 1024), 2)
+            if not os.path.exists(part_file_path) or os.path.getsize(part_file_path) == 0:
+                print(
+                    "Notice: Partial download file missing or empty. Restarting download from beginning."
+                )
+                current_idx = 0
+                with suppress(FileNotFoundError):
+                    os.remove(part_file_path)
+            else:
+                initial_size = round(os.path.getsize(part_file_path) / (1024 * 1024), 2)
+                print(
+                    f"Resuming download from segment {current_idx}/{all_files} ({initial_size} MB downloaded)."
+                )
         else:
             with suppress(FileNotFoundError):
                 os.remove(part_file_path)
 
+        self.save_resume_state(current_idx)
+
         if expected_size and initial_size > expected_size:
             expected_size = initial_size
 
-        if current_idx <= all_files:
+        if current_idx >= all_files:
+            print(f"All {all_files} segments already downloaded. Proceeding to remux.")
+        else:
             bar_fmt = (
                 "{percentage:3.0f}%|{bar}| {n:.2f}/{total_fmt} MB [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
                 if expected_size > 0
@@ -997,7 +1025,7 @@ class Downloader:
                         if len(bigbuffer) > DUMP_EVERY:
                             with open(part_file_path, "ab") as f:
                                 f.write(bigbuffer)
-                            self.save_resume_state(current_idx)
+                            self.save_resume_state(min(current_idx, all_files))
                             pbar_update(bigbuffer)
                             bigbuffer = b""
 
@@ -1006,7 +1034,7 @@ class Downloader:
                     if bigbuffer:
                         with open(part_file_path, "ab") as f:
                             f.write(bigbuffer)
-                        self.save_resume_state(current_idx)
+                        self.save_resume_state(min(current_idx, all_files))
                         pbar_update(bigbuffer)
                         bigbuffer = b""
 

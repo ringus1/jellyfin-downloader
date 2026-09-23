@@ -121,7 +121,7 @@ async def run_app():
     try:
         await active_downloader.start_session(resume=resume)
         await active_downloader.download_subtitles()
-        await active_downloader.download_files()
+        await active_downloader.download_files(resume=resume)
     except (KeyboardInterrupt, ProcessInterrupted):
         print("Interrupted, closing...")
     finally:
